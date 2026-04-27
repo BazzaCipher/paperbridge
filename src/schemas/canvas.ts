@@ -9,7 +9,7 @@ import { OPERATION_IDS } from '../core/operations/operationRegistry';
 const SimpleDataTypeSchema = z.enum(['string', 'number', 'boolean', 'date', 'currency']);
 
 /** Extended data types including complex types and legacy 'text' alias */
-const ExtendedDataTypeSchema = z.enum(['string', 'number', 'boolean', 'date', 'currency', 'array', 'table', 'text']);
+const ExtendedDataTypeSchema = z.enum(['string', 'number', 'boolean', 'date', 'currency', 'array', 'table', 'txngroup', 'text']);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // GEOMETRY SCHEMAS
@@ -74,6 +74,7 @@ const ExtractedRegionSchema = z.object({
   dataType: SimpleDataTypeSchema,
   color: z.string(),
   valueCache: ValueCacheSchema.optional(),
+  role: z.enum(['amount', 'date', 'description']).optional(),
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -173,6 +174,7 @@ const ExtractorNodeDataSchema = FileNodeDataSchema.extend({
   currentPage: z.number(),
   totalPages: z.number(),
   outputs: z.record(z.string(), z.any()).optional(), // Runtime computed
+  invoiceTxnGroupId: z.string().optional(),
 });
 
 // Calculation result - uses SimpleDataType (no complex types)
@@ -244,6 +246,7 @@ const GroupNodeDataSchema = z.object({
   height: z.number(),
   backgroundColor: z.string().optional(),
   collapsed: z.boolean().optional(),
+  aggregatedTxnGroupId: z.string().optional(),
 });
 
 // Position

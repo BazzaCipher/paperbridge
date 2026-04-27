@@ -183,6 +183,17 @@ export function GroupNode({ id, data, selected }: NodeProps<GroupNodeType>) {
           className="border-2 border-white !pointer-events-none"
           isConnectable={false}
         />
+
+        {/* Aggregated TxnGroup handle (when children emitted txngroup outputs) */}
+        {data.aggregatedTxnGroupId && (
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={`txngroup:${data.aggregatedTxnGroupId}`}
+            style={{ ...handleStyle, right: -8, top: '70%', background: '#10b981' }}
+            className="border-2 border-white"
+          />
+        )}
       </div>
     );
   }

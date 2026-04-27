@@ -20,6 +20,7 @@ interface RegionListProps {
   onRegionDelete: (regionId: string) => void;
   onRegionLabelChange: (regionId: string, label: string) => void;
   onRegionDataTypeChange: (regionId: string, dataType: SimpleDataType) => void;
+  onRegionRoleChange?: (regionId: string, role: 'amount' | 'date' | 'description' | undefined) => void;
   onValueChange?: (regionId: string, value: string) => void;
   onExtract?: (regionId: string) => void;
   isExtracting?: boolean;
@@ -78,6 +79,7 @@ export function RegionList({
   onRegionDelete,
   onRegionLabelChange,
   onRegionDataTypeChange,
+  onRegionRoleChange,
   onValueChange,
   onExtract,
   isExtracting = false,
@@ -137,6 +139,16 @@ export function RegionList({
                 <span className="text-xs text-bridge-500 truncate max-w-[60px]">
                   {region.label}
                 </span>
+
+                {/* Role chip */}
+                {region.role && (
+                  <span
+                    className="text-[9px] px-1 rounded bg-emerald-100 text-emerald-700 flex-shrink-0"
+                    title={`Role: ${region.role}`}
+                  >
+                    {region.role === 'description' ? 'desc' : region.role}
+                  </span>
+                )}
 
                 {/* Value */}
                 <span className={`text-sm font-medium truncate flex-1 ${
@@ -259,6 +271,35 @@ export function RegionList({
                   </button>
                 ))}
               </div>
+
+              {/* Reconciliation role tag - only when handler is wired */}
+              {onRegionRoleChange && (
+                <div className="flex items-center gap-1 mb-2 text-[10px]">
+                  <span className="text-bridge-400 mr-1">Role:</span>
+                  {([
+                    { value: undefined, label: 'none' },
+                    { value: 'amount' as const, label: 'amount' },
+                    { value: 'date' as const, label: 'date' },
+                    { value: 'description' as const, label: 'desc' },
+                  ]).map((opt) => (
+                    <button
+                      key={opt.label}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRegionRoleChange(region.id, opt.value);
+                      }}
+                      className={`px-1.5 py-0.5 rounded transition-colors ${
+                        region.role === opt.value
+                          ? 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-300'
+                          : 'bg-paper-100 text-bridge-500 hover:bg-paper-200'
+                      }`}
+                      title={`Tag as ${opt.label}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Value display/input */}
               <div className={`rounded p-2 ${getTypeColorClass(region.dataType)} ${

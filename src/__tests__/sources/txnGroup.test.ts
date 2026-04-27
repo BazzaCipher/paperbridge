@@ -1,0 +1,165 @@
+import { describe, it, expect } from 'vitest';
+import type { MaterializedTable } from '../../core/extraction/tableMaterializer';
+import {
+  normalizeDate,
+  parseSignedAmount,
+  materializedTableToTxnGroup,
+  suggestBankMapping,
+} from '../../core/sources/txnGroup';
+
+const META = { nodeId: 'ext1', label: 'Bank A', fileId: 'f1', pageRange: [1, 1] as [number, number] };
+
+describe('normalizeDate', () => {
+  it('passes through ISO dates', () => {
+    expect(normalizeDate('2026-04-27')).toBe('2026-04-27');
+  });
+  it('handles DD/MM/YYYY (AU)', () => {
+    expect(normalizeDate('27/04/2026')).toBe('2026-04-27');
+    expect(normalizeDate('1/4/26')).toBe('2026-04-01');
+  });
+  it('handles DD MMM YYYY', () => {
+    expect(normalizeDate('27 Apr 2026')).toBe('2026-04-27');
+    expect(normalizeDate('1-Jan-25')).toBe('2025-01-01');
+  });
+  it('returns input unchanged when no pattern matches', () => {
+    expect(normalizeDate('not a date')).toBe('not a date');
+  });
+});
+
+describe('parseSignedAmount', () => {
+  it('parses plain numbers', () => {
+    expect(parseSignedAmount('1,234.56')).toBeCloseTo(1234.56);
+  });
+  it('handles parens as negative', () => {
+    expect(parseSignedAmount('(123.45)', { negativeParens: true })).toBeCloseTo(-123.45);
+  });
+  it('strips currency symbols', () => {
+    expect(parseSignedAmount('$1,000.00', { currencySymbols: true })).toBeCloseTo(1000);
+    expect(parseSignedAmount('AUD 50.25', { currencySymbols: true })).toBeCloseTo(50.25);
+  });
+  it('handles trailing minus', () => {
+    expect(parseSignedAmount('100.00-')).toBeCloseTo(-100);
+  });
+  it('returns NaN for unparseable', () => {
+    expect(parseSignedAmount('abc')).toBeNaN();
+  });
+});
+
+describe('materializedTableToTxnGroup — single signed amount column', () => {
+  const table: MaterializedTable = {
+    headers: ['Date', 'Description', 'Amount', 'Balance'],
+    rows: [
+      ['27/04/2026', 'COFFEE SHOP', '-5.50', '1,000.00'],
+      ['28/04/2026', 'SALARY', '2,500.00', '3,500.00'],
+    ],
+    cellBoxes: [],
+  };
+
+  it('produces transactions with signed amounts and source tracking', () => {
+    const g = materializedTableToTxnGroup(
+      table,
+      { date: 'Date', description: 'Description', amount: 'Amount', balance: 'Balance' },
+      META,
+    );
+    expect(g.transactions).toHaveLength(2);
+    expect(g.transactions[0]).toMatchObject({
+      date: '2026-04-27',
+      description: 'COFFEE SHOP',
+      amount: -5.5,
+      sourceNodeId: 'ext1',
+    });
+    expect(g.transactions[0].sourceRowId).toBe('row-0');
+    expect(g.transactions[1].amount).toBe(2500);
+    expect(g.origin.kind).toBe('bank');
+    expect(g.origin.sourceHeaders).toEqual(table.headers);
+  });
+
+  it('preserves raw cells keyed by header', () => {
+    const g = materializedTableToTxnGroup(
+      table,
+      { date: 'Date', description: 'Description', amount: 'Amount' },
+      META,
+    );
+    expect(g.transactions[0].raw).toMatchObject({
+      Date: '27/04/2026',
+      Description: 'COFFEE SHOP',
+      Amount: '-5.50',
+      Balance: '1,000.00',
+    });
+  });
+
+  it('transaction id is stable for same inputs', () => {
+    const g1 = materializedTableToTxnGroup(table, { date: 'Date', description: 'Description', amount: 'Amount' }, META);
+    const g2 = materializedTableToTxnGroup(table, { date: 'Date', description: 'Description', amount: 'Amount' }, META);
+    expect(g1.transactions[0].id).toBe(g2.transactions[0].id);
+  });
+});
+
+describe('materializedTableToTxnGroup — debit/credit pair (CBA-style)', () => {
+  const table: MaterializedTable = {
+    headers: ['Date', 'Details', 'Debit', 'Credit', 'Balance'],
+    rows: [
+      ['27/04/2026', 'COFFEE', '5.50', '', '994.50'],
+      ['28/04/2026', 'SALARY', '', '2,500.00', '3,494.50'],
+      ['', '', '', '', ''],
+    ],
+    cellBoxes: [],
+  };
+
+  it('signs debits negative and credits positive', () => {
+    const g = materializedTableToTxnGroup(
+      table,
+      { date: 'Date', description: 'Details', debit: 'Debit', credit: 'Credit', balance: 'Balance' },
+      META,
+    );
+    expect(g.transactions).toHaveLength(2);
+    expect(g.transactions[0].amount).toBe(-5.5);
+    expect(g.transactions[1].amount).toBe(2500);
+  });
+});
+
+describe('suggestBankMapping', () => {
+  it('detects single-amount layout', () => {
+    const table: MaterializedTable = {
+      headers: ['Date', 'Description', 'Amount', 'Balance'],
+      rows: [
+        ['27/04/2026', 'COFFEE SHOP', '-5.50', '1,000.00'],
+        ['28/04/2026', 'SALARY', '2,500.00', '3,500.00'],
+      ],
+      cellBoxes: [],
+    };
+    const { mapping, confidence } = suggestBankMapping(table);
+    expect(mapping).not.toBeNull();
+    expect(mapping!.date).toBe('Date');
+    expect(mapping!.description).toBe('Description');
+    expect(mapping!.amount).toBe('Amount');
+    expect(mapping!.balance).toBe('Balance');
+    expect(confidence).toBeGreaterThan(0.5);
+  });
+
+  it('detects debit/credit layout', () => {
+    const table: MaterializedTable = {
+      headers: ['Trans Date', 'Particulars', 'Debit', 'Credit', 'Balance'],
+      rows: [
+        ['27/04/2026', 'COFFEE', '5.50', '', '994.50'],
+        ['28/04/2026', 'SALARY', '', '2,500.00', '3,494.50'],
+      ],
+      cellBoxes: [],
+    };
+    const { mapping } = suggestBankMapping(table);
+    expect(mapping).not.toBeNull();
+    expect(mapping!.debit).toBe('Debit');
+    expect(mapping!.credit).toBe('Credit');
+    expect(mapping!.amount).toBeUndefined();
+  });
+
+  it('returns null when required columns are missing', () => {
+    const table: MaterializedTable = {
+      headers: ['Foo', 'Bar', 'Baz'],
+      rows: [['a', 'b', 'c']],
+      cellBoxes: [],
+    };
+    const { mapping } = suggestBankMapping(table);
+    expect(mapping).toBeNull();
+  });
+});

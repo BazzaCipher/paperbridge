@@ -1,18 +1,24 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { NodeProps } from '@xyflow/react';
-import { useEdges } from '@xyflow/react';
+import { useEdges, Position } from '@xyflow/react';
 import { BaseNode } from './base/BaseNode';
 import { DocumentViewer } from './file/DocumentViewer';
 import { RegionSelector } from './file/RegionSelector';
 import { HighlightOverlay } from './file/HighlightOverlay';
 import { RegionList } from './file/RegionList';
+import { NodeEntry } from './base/NodeEntry';
 import { FileNodePreview } from './file/FileNodePreview';
 import { Modal } from '../ui/Modal';
 import { ZoomControls } from '../ui/ZoomControls';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { FileDropZone } from '../ui/FileDropZone';
-import { extractTextFromRegion, extractFullPage } from '../../core/extraction/ocrExtractor';
+import { extractTextFromRegion, extractFullPage, extractFullPageFromRegion, type FullPageOcrResult } from '../../core/extraction/ocrExtractor';
 import { detectFields, fieldOverlapsExisting } from '../../core/extraction/fieldDetector';
+import { buildTableSelectionFromOcr } from '../../core/extraction/tableParser';
+import { materializeTable, type TableSelection, type MaterializedTable } from '../../core/extraction/tableMaterializer';
+import { detectTableWithAI } from '../../services/aiService';
+import { suggestBankMapping, materializedTableToTxnGroup, regionsToInvoiceTxnGroup } from '../../core/sources/txnGroup';
+import { useAiSettings } from '../../hooks/useAiSettings';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useToast } from '../ui/Toast';
 import { useFileNode } from '../../hooks/useFileNode';
@@ -21,7 +27,7 @@ import { useSyncNodeOutputs } from '../../hooks/useSyncNodeOutputs';
 import { useDocumentZoom } from '../../hooks/useDocumentZoom';
 import { getColorForType, getCompatibleTypes } from '../../utils/colors';
 import { generateId } from '../../utils/id';
-import { createRegionFromBox, createRegionFromText } from '../../utils/regions';
+import { createRegionFromBox, createRegionFromText, roleFromFieldType } from '../../utils/regions';
 import { BlobRegistry } from '../../store/canvasPersistence';
 import { FilePickerModal } from '../ui/FilePickerModal';
 import type {
@@ -29,6 +35,7 @@ import type {
   NodeOutput,
   RegionCoordinates,
   ExtractedRegion,
+  TableRecord,
   TextRange,
   SimpleDataType,
   DisplayNodeData,
@@ -41,10 +48,92 @@ const VIEWER_WIDTH = 500;
 // Confidence threshold for OCR warnings (0-100)
 const LOW_CONFIDENCE_THRESHOLD = 50;
 
+/**
+ * Session-level cache of OCR snapshots per TableRecord id. Lost on reload — the
+ * Extractor lazily re-OCRs from the persisted pageBbox when a separator is
+ * dragged after a fresh load. Keeps node JSON small.
+ */
+const tableOcrCache = new Map<string, FullPageOcrResult>();
+
+function buildRowRegions(
+  table: MaterializedTable,
+  selection: TableSelection,
+  pageSize: { width: number; height: number },
+  pageBbox: RegionCoordinates,
+  pageNumber: number,
+  tableId: string,
+  nodeId: string,
+  ocrConfidence: number,
+  baseRegionIndex: number,
+  reuseIds?: Map<number, string>,
+): ExtractedRegion[] {
+  const W = pageSize.width || pageBbox.width;
+  const H = pageSize.height || pageBbox.height;
+  const rowEdgesNorm = [selection.bbox.y0, ...selection.rowYs, selection.bbox.y1];
+  const rowEdgesPx = rowEdgesNorm.map((y) => y * H);
+  const xLeftPx = selection.bbox.x0 * W;
+  const xRightPx = selection.bbox.x1 * W;
+  const sx = pageBbox.width / W;
+  const sy = pageBbox.height / H;
+
+  const headerIdx = selection.headerRowIndex;
+  const out: ExtractedRegion[] = [];
+  let rowDisplayIndex = 0;
+  for (let i = 0; i < table.rows.length + (headerIdx !== undefined ? 1 : 0); i++) {
+    if (headerIdx !== undefined && i === headerIdx) continue;
+    const yTop = rowEdgesPx[i];
+    const yBot = rowEdgesPx[i + 1];
+    const rowCoords: RegionCoordinates = {
+      x: pageBbox.x + xLeftPx * sx,
+      y: pageBbox.y + yTop * sy,
+      width: (xRightPx - xLeftPx) * sx,
+      height: (yBot - yTop) * sy,
+    };
+    const dataIdx = headerIdx !== undefined && i > headerIdx ? i - 1 : i;
+    const cells = table.rows[dataIdx];
+    if (!cells || !cells.some((c) => c.length > 0)) continue;
+    const rowText = cells.join(' | ');
+    const reuseId = reuseIds?.get(rowDisplayIndex);
+    const base = reuseId
+      ? null
+      : createRegionFromBox(rowCoords, pageNumber, baseRegionIndex + out.length);
+    const regionId = reuseId ?? base!.id;
+    out.push({
+      id: regionId,
+      label: `Row ${rowDisplayIndex + 1}: ${cells[0] || ''}`.trim(),
+      selectionType: 'box',
+      coordinates: rowCoords,
+      pageNumber,
+      dataType: 'string',
+      color: getColorForType('string').border,
+      extractedData: {
+        type: 'string',
+        value: rowText,
+        source: {
+          nodeId,
+          regionId,
+          pageNumber,
+          coordinates: rowCoords,
+          extractionMethod: 'ocr' as const,
+          confidence: ocrConfidence,
+        },
+      },
+      tableSourceId: tableId,
+      tableRowIndex: rowDisplayIndex,
+    });
+    rowDisplayIndex++;
+  }
+  return out;
+}
+
 export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeType>) {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const replaceNode = useCanvasStore((state) => state.replaceNode);
   const removeEdge = useCanvasStore((state) => state.removeEdge);
+  const addTxnGroup = useCanvasStore((state) => state.addTxnGroup);
+  const updateTxnGroup = useCanvasStore((state) => state.updateTxnGroup);
+  const removeTxnGroup = useCanvasStore((state) => state.removeTxnGroup);
+  const getTxnGroup = useCanvasStore((state) => state.getTxnGroup);
   const edges = useEdges();
   const nodeOutputs = useNodeOutputs(id);
   const { showToast } = useToast();
@@ -55,7 +144,9 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
   const [, setViewerHeight] = useState(400);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [selectionMode, setSelectionMode] = useState<'select' | 'box' | 'text'>('box');
+  const [selectionMode, setSelectionMode] = useState<'select' | 'box' | 'text' | 'table'>('box');
+  const [isExtractingTable, setIsExtractingTable] = useState(false);
+  const { activeProvider, activeConfig } = useAiSettings();
   const [pageOffsets, setPageOffsets] = useState<Map<number, number>>(new Map());
   const [pdfError, setPdfError] = useState<string | null>(null);
   const imageRef = useRef<HTMLImageElement | HTMLCanvasElement | null>(null);
@@ -111,6 +202,47 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     Object.keys(outputs).length > 0 ? outputs : undefined,
     nodeOutputs
   );
+
+  // ── Maintain invoice TxnGroup from role-tagged regions ───────────────────
+  // Single-Transaction TxnGroup emitted when any region has role: 'amount'.
+  // Synced into txnGroupSlice; id persisted on data.invoiceTxnGroupId.
+  useEffect(() => {
+    const hasAmount = data.regions.some((r) => r.role === 'amount');
+    const persistedId = data.invoiceTxnGroupId;
+
+    if (!hasAmount) {
+      if (persistedId) {
+        removeTxnGroup(persistedId);
+        updateNodeData(id, { invoiceTxnGroupId: undefined });
+      }
+      return;
+    }
+
+    const tagged = data.regions
+      .filter((r) => r.role)
+      .map((r) => ({
+        id: r.id,
+        role: r.role,
+        value: String(r.extractedData?.value ?? ''),
+      }));
+
+    const group = regionsToInvoiceTxnGroup(tagged, {
+      nodeId: id,
+      label: data.label || 'Invoice',
+      id: persistedId,
+    });
+    if (!group) return;
+
+    if (persistedId && getTxnGroup(persistedId)) {
+      updateTxnGroup(persistedId, group);
+    } else {
+      const newId = addTxnGroup(group);
+      if (newId !== persistedId) {
+        updateNodeData(id, { invoiceTxnGroupId: newId });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, data.regions, data.label, data.invoiceTxnGroupId]);
 
   const handleFileInit = useCallback(
     (fileData: { fileUrl: string; fileId: string; fileName: string; fileType: 'pdf' | 'image' }) => {
@@ -172,6 +304,234 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       setSelectedRegionId(newRegion.id);
     },
     [id, data.regions, data.currentPage, updateNodeData]
+  );
+
+  const handleTableExtract = useCallback(
+    async (coordinates: RegionCoordinates, pageNumber?: number) => {
+      if (!data.fileUrl) {
+        showToast('No document loaded', 'error');
+        return;
+      }
+      const page = pageNumber ?? data.currentPage;
+
+      let imageSource: HTMLImageElement | HTMLCanvasElement | string;
+      if (imageRef.current) {
+        imageSource = imageRef.current;
+      } else if (data.fileType === 'image') {
+        imageSource = data.fileUrl;
+      } else {
+        showToast('PDF not ready. Please wait and try again.', 'warning');
+        return;
+      }
+
+      setIsExtractingTable(true);
+      try {
+        const ocr = await extractFullPageFromRegion(imageSource, coordinates);
+
+        let selection: TableSelection | null = null;
+
+        if (activeProvider && activeConfig?.apiKey) {
+          try {
+            // Crop is already the table region — hint bbox covers full crop.
+            selection = await detectTableWithAI(
+              {
+                ocrWords: ocr.words,
+                hintBbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
+              },
+              activeProvider.id,
+              activeConfig.selectedModel,
+              activeConfig.apiKey,
+            );
+          } catch (err) {
+            console.warn('detectTableWithAI failed, falling back to heuristic:', err);
+          }
+        }
+
+        if (!selection) {
+          const built = buildTableSelectionFromOcr(ocr);
+          if (!built) {
+            showToast('Could not detect a table in the selected region.', 'warning');
+            return;
+          }
+          selection = built.selection;
+        }
+
+        const table = materializeTable(selection, ocr);
+
+        const tableId = generateId('table');
+        const pageSize = { width: ocr.imageWidth || coordinates.width, height: ocr.imageHeight || coordinates.height };
+        tableOcrCache.set(tableId, ocr);
+
+        const newRegions = buildRowRegions(
+          table,
+          selection,
+          pageSize,
+          coordinates,
+          page,
+          tableId,
+          id,
+          ocr.confidence,
+          data.regions.length,
+        );
+
+        if (newRegions.length === 0) {
+          showToast('No populated rows detected.', 'warning');
+          return;
+        }
+
+        let txnGroupId: string | undefined;
+        const suggested = suggestBankMapping(table);
+        if (suggested.mapping && suggested.confidence >= 0.7) {
+          const group = materializedTableToTxnGroup(table, suggested.mapping, {
+            nodeId: id,
+            label: data.label || 'Bank statement',
+            fileId: data.fileId ?? '',
+            pageRange: [page, page],
+          });
+          if (group.transactions.length > 0) {
+            txnGroupId = addTxnGroup(group);
+          }
+        }
+
+        const tableRecord: TableRecord = {
+          id: tableId,
+          pageNumber: page,
+          pageBbox: coordinates,
+          pageSize,
+          selection,
+          txnGroupId,
+        };
+
+        updateNodeData(id, {
+          regions: [...data.regions, ...newRegions],
+          tables: [...(data.tables ?? []), tableRecord],
+        });
+        showToast(
+          `Extracted ${newRegions.length} row${newRegions.length === 1 ? '' : 's'} from table`,
+          'success',
+        );
+      } catch (err) {
+        console.error('Table extraction failed:', err);
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        showToast(`Table extraction failed: ${msg}`, 'error');
+      } finally {
+        setIsExtractingTable(false);
+      }
+    },
+    [
+      id,
+      data.fileUrl,
+      data.fileType,
+      data.currentPage,
+      data.regions,
+      data.tables,
+      activeProvider,
+      activeConfig,
+      updateNodeData,
+      showToast,
+      data.fileId,
+      data.label,
+      addTxnGroup,
+    ],
+  );
+
+  // Re-materialize a table with an updated TableSelection and replace its rows.
+  // Reuses cached OCR; lazily re-OCRs from pageBbox if the cache is cold (post-reload).
+  const rematerializeTable = useCallback(
+    async (tableId: string, nextSelection: TableSelection) => {
+      const tableRecord = (data.tables ?? []).find((t) => t.id === tableId);
+      if (!tableRecord || !data.fileUrl) return;
+
+      let ocr = tableOcrCache.get(tableId);
+      if (!ocr) {
+        let imageSource: HTMLImageElement | HTMLCanvasElement | string;
+        if (imageRef.current) imageSource = imageRef.current;
+        else if (data.fileType === 'image') imageSource = data.fileUrl;
+        else {
+          showToast('PDF not ready. Please reopen the document.', 'warning');
+          return;
+        }
+        ocr = await extractFullPageFromRegion(imageSource, tableRecord.pageBbox);
+        tableOcrCache.set(tableId, ocr);
+      }
+
+      const table = materializeTable(nextSelection, ocr);
+
+      // Reuse ids from existing rows of this table where possible to avoid identity churn.
+      const existingRows = data.regions
+        .filter((r) => r.tableSourceId === tableId)
+        .sort((a, b) => (a.tableRowIndex ?? 0) - (b.tableRowIndex ?? 0));
+      const reuseIds = new Map<number, string>();
+      existingRows.forEach((r, i) => reuseIds.set(i, r.id));
+
+      const newRows = buildRowRegions(
+        table,
+        nextSelection,
+        tableRecord.pageSize,
+        tableRecord.pageBbox,
+        tableRecord.pageNumber,
+        tableId,
+        id,
+        ocr.confidence,
+        data.regions.length,
+        reuseIds,
+      );
+
+      const otherRegions = data.regions.filter((r) => r.tableSourceId !== tableId);
+      const nextTables = (data.tables ?? []).map((t) =>
+        t.id === tableId ? { ...t, selection: nextSelection } : t,
+      );
+      updateNodeData(id, {
+        regions: [...otherRegions, ...newRows],
+        tables: nextTables,
+      });
+    },
+    [id, data.fileUrl, data.fileType, data.regions, data.tables, updateNodeData, showToast],
+  );
+
+  // Drag a row's top or bottom edge: mutate the corresponding rowYs separator
+  // and re-materialize. deltaY is in page pixel space.
+  const handleRowEdgeDrag = useCallback(
+    (regionId: string, edge: 'top' | 'bottom', deltaY: number) => {
+      const region = data.regions.find((r) => r.id === regionId);
+      if (!region || !region.tableSourceId || region.tableRowIndex === undefined) return;
+      const tableRecord = (data.tables ?? []).find((t) => t.id === region.tableSourceId);
+      if (!tableRecord) return;
+
+      const rowIndex = region.tableRowIndex; // among emitted (non-header, non-empty) rows
+      // Translate the emitted row index back to the materialized row index, accounting for header.
+      // Approximation: assume no skipped (empty) rows in the materialized output.
+      const headerIdx = tableRecord.selection.headerRowIndex;
+      const matRowIndex =
+        headerIdx !== undefined && rowIndex >= headerIdx ? rowIndex + 1 : rowIndex;
+      // rowYs separators are between materialized rows: rowYs[i] separates row i from i+1.
+      const sepIdx = edge === 'top' ? matRowIndex - 1 : matRowIndex;
+      if (sepIdx < 0 || sepIdx >= tableRecord.selection.rowYs.length) return;
+
+      const dyNorm = deltaY / tableRecord.pageBbox.height;
+      const nextRowYs = [...tableRecord.selection.rowYs];
+      const lower = sepIdx > 0 ? nextRowYs[sepIdx - 1] : tableRecord.selection.bbox.y0;
+      const upper =
+        sepIdx < nextRowYs.length - 1 ? nextRowYs[sepIdx + 1] : tableRecord.selection.bbox.y1;
+      const candidate = nextRowYs[sepIdx] + dyNorm;
+      const minGap = 0.005;
+      nextRowYs[sepIdx] = Math.min(upper - minGap, Math.max(lower + minGap, candidate));
+
+      const nextSelection: TableSelection = { ...tableRecord.selection, rowYs: nextRowYs };
+      void rematerializeTable(tableRecord.id, nextSelection);
+    },
+    [data.regions, data.tables, rematerializeTable],
+  );
+
+  const handleBoxOrTableCreate = useCallback(
+    (coordinates: RegionCoordinates, pageNumber?: number) => {
+      if (selectionMode === 'table') {
+        void handleTableExtract(coordinates, pageNumber);
+      } else {
+        handleRegionCreate(coordinates, pageNumber);
+      }
+    },
+    [selectionMode, handleTableExtract, handleRegionCreate],
   );
 
   const handleTextSelect = useCallback(
@@ -245,6 +605,17 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       });
     },
     [id, data.regions, updateNodeData]
+  );
+
+  const handleRegionRoleChange = useCallback(
+    (regionId: string, role: 'amount' | 'date' | 'description' | undefined) => {
+      updateNodeData(id, {
+        regions: data.regions.map((r) =>
+          r.id === regionId ? { ...r, role } : r,
+        ),
+      });
+    },
+    [id, data.regions, updateNodeData],
   );
 
   const handleValueChange = useCallback(
@@ -400,6 +771,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           },
           dataType: field.dataType,
           color: getColorForType(field.dataType).border,
+          role: roleFromFieldType(field.fieldType),
         };
       });
 
@@ -546,6 +918,45 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           )}
         </div>
 
+        {/* Invoice TxnGroup handle - emitted when any region has role: 'amount' */}
+        {data.invoiceTxnGroupId && (
+          <NodeEntry
+            key={`txngroup-invoice-${data.invoiceTxnGroupId}`}
+            id={`txngroup:${data.invoiceTxnGroupId}`}
+            handleType="source"
+            handlePosition={Position.Right}
+            handleColor="#10b981"
+          >
+            <div className="flex items-center gap-2 flex-1 min-w-0 py-0.5">
+              <div className="w-2 h-2 rounded-full flex-shrink-0 bg-emerald-500" />
+              <span className="text-xs text-bridge-500 truncate">Invoice</span>
+            </div>
+          </NodeEntry>
+        )}
+
+        {/* TxnGroup handles - one per detected bank statement table */}
+        {(data.tables ?? [])
+          .filter((t) => t.txnGroupId)
+          .map((t) => (
+            <NodeEntry
+              key={`txngroup-${t.id}`}
+              id={`txngroup:${t.txnGroupId}`}
+              handleType="source"
+              handlePosition={Position.Right}
+              handleColor="#10b981"
+            >
+              <div className="flex items-center gap-2 flex-1 min-w-0 py-0.5">
+                <div className="w-2 h-2 rounded-full flex-shrink-0 bg-emerald-500" />
+                <span className="text-xs text-bridge-500 truncate">
+                  Bank statement
+                </span>
+                <span className="text-[10px] text-bridge-400">
+                  p{t.pageNumber}
+                </span>
+              </div>
+            </NodeEntry>
+          ))}
+
         {/* Compact region list with values - no OCR button here */}
         <RegionList
           regions={data.regions}
@@ -554,6 +965,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           onRegionDelete={handleRegionDelete}
           onRegionLabelChange={handleRegionLabelChange}
           onRegionDataTypeChange={handleRegionDataTypeChange}
+          onRegionRoleChange={handleRegionRoleChange}
           compact
           nodeId={id}
         />
@@ -602,6 +1014,27 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                   <path d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm0 2h10v10H5V5z" />
                 </svg>
                 Box
+              </button>
+              <button
+                onClick={() => setSelectionMode('table')}
+                disabled={isExtractingTable}
+                className={`px-3 py-1.5 text-xs rounded-md transition-colors flex items-center gap-1.5 ${
+                  selectionMode === 'table'
+                    ? 'bg-copper-500 text-white shadow-sm'
+                    : 'bg-paper-100 text-bridge-600 hover:bg-paper-200'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {isExtractingTable ? (
+                  <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 1v3h4V5H5zm6 0v3h4V5h-4zM5 10v3h4v-3H5zm6 0v3h4v-3h-4zM5 15v1h4v-1H5zm6 0v1h4v-1h-4z" clipRule="evenodd" />
+                  </svg>
+                )}
+                Table
               </button>
               {data.fileType === 'pdf' && (
                 <button
@@ -688,18 +1121,19 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                       currentPage={data.currentPage}
                       selectedRegionId={selectedRegionId}
                       onRegionSelect={handleRegionSelect}
-                      interactive={selectionMode === 'select' || selectionMode === 'box'}
+                      interactive={selectionMode === 'select' || selectionMode === 'box' || selectionMode === 'table'}
                       nodeId={id}
                       scrollMode={true}
                       pageOffsets={pageOffsets}
+                      onRowEdgeDrag={handleRowEdgeDrag}
                     />
                   )}
                 </DocumentViewer>
               </div>
               {/* RegionSelector fills entire viewer area — allows drawing outside the page */}
-              {data.fileUrl && selectionMode === 'box' && (
+              {data.fileUrl && (selectionMode === 'box' || selectionMode === 'table') && (
                 <RegionSelector
-                  onRegionCreate={handleRegionCreate}
+                  onRegionCreate={handleBoxOrTableCreate}
                   documentRef={documentRef}
                   pageOffsets={pageOffsets}
                   zoom={zoom}
@@ -722,6 +1156,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
               onRegionDelete={handleRegionDelete}
               onRegionLabelChange={handleRegionLabelChange}
               onRegionDataTypeChange={handleRegionDataTypeChange}
+              onRegionRoleChange={handleRegionRoleChange}
               onValueChange={handleValueChange}
               onExtract={handleExtract}
               isExtracting={isExtracting}
@@ -737,6 +1172,8 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
               ? 'Click on a highlight to select it.'
               : selectionMode === 'box'
               ? 'Draw a box to create a field.'
+              : selectionMode === 'table'
+              ? 'Draw a box around a table to extract its rows.'
               : 'Select text directly to create a field with that value.'}
           </span>
           <span className="text-bridge-400">

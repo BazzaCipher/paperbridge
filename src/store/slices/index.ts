@@ -12,3 +12,4 @@ export * from './persistenceSlice';
 export * from './validationSlice';
 export * from './layoutSlice';
 export * from './fileRegistrySlice';
+export * from './txnGroupSlice';

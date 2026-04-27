@@ -1,8 +1,65 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type { ExtractedRegion } from '../../../types';
 import { getColorForType } from '../../../utils/colors';
 import { useCanvasStore } from '../../../store/canvasStore';
 import { Highlightable } from '../../../types/categories';
+
+function RowEdgeHandle({
+  edge,
+  color,
+  onDrag,
+}: {
+  edge: 'top' | 'bottom';
+  color: string;
+  onDrag: (deltaY: number) => void;
+}) {
+  const startYRef = useRef<number | null>(null);
+  const lastEmittedRef = useRef<number>(0);
+
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    startYRef.current = e.clientY;
+    lastEmittedRef.current = 0;
+  }, []);
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (startYRef.current === null) return;
+      const total = e.clientY - startYRef.current;
+      const delta = total - lastEmittedRef.current;
+      if (Math.abs(delta) < 1) return;
+      lastEmittedRef.current = total;
+      onDrag(delta);
+    },
+    [onDrag],
+  );
+
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (startYRef.current === null) return;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    startYRef.current = null;
+    lastEmittedRef.current = 0;
+  }, []);
+
+  return (
+    <div
+      className="absolute left-0 right-0 cursor-ns-resize pointer-events-auto"
+      style={{
+        height: 6,
+        [edge]: -3,
+        backgroundColor: color,
+        opacity: 0.6,
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}
 
 interface HighlightOverlayProps {
   regions: ExtractedRegion[];
@@ -13,6 +70,8 @@ interface HighlightOverlayProps {
   nodeId?: string; // Node ID for comparing with external highlight
   scrollMode?: boolean; // When true, show regions from all pages with Y offset
   pageOffsets?: Map<number, number>; // Y offset for each page in scrollMode
+  /** When set, rows linked to a TableRecord get draggable top/bottom edges. */
+  onRowEdgeDrag?: (regionId: string, edge: 'top' | 'bottom', deltaY: number) => void;
 }
 
 export function HighlightOverlay({
@@ -24,6 +83,7 @@ export function HighlightOverlay({
   nodeId,
   scrollMode = false,
   pageOffsets,
+  onRowEdgeDrag,
 }: HighlightOverlayProps) {
   // Check if a region is externally highlighted
   const highlightedHandle = useCanvasStore(state => state.highlightedHandle);
@@ -111,6 +171,22 @@ export function HighlightOverlay({
                 <div
                   className="absolute -bottom-1 -right-1 w-2 h-2 rounded-full"
                   style={{ backgroundColor: colors.border }}
+                />
+              </>
+            )}
+
+            {/* Draggable top/bottom edges for table-row regions */}
+            {region.tableSourceId && onRowEdgeDrag && (
+              <>
+                <RowEdgeHandle
+                  edge="top"
+                  color={colors.border}
+                  onDrag={(dy) => onRowEdgeDrag(region.id, 'top', dy)}
+                />
+                <RowEdgeHandle
+                  edge="bottom"
+                  color={colors.border}
+                  onDrag={(dy) => onRowEdgeDrag(region.id, 'bottom', dy)}
                 />
               </>
             )}

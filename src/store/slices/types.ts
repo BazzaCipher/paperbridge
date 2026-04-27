@@ -5,6 +5,7 @@
 import type { Edge, Viewport } from '@xyflow/react';
 import type { LynkNode } from '../../types';
 import type { VirtualFolder } from '../canvasPersistence';
+import type { TxnGroup } from '../../core/sources/txnGroup';
 
 // History snapshot for undo/redo
 export interface HistorySnapshot {
@@ -42,4 +43,7 @@ export interface CanvasStoreState {
   fileRegistryViewMode: 'flat' | 'hierarchy';
   virtualFolders: VirtualFolder[];
   _fileRegistryVersion: number;
+
+  // TxnGroup state
+  txnGroups: Record<string, TxnGroup>;
 }

@@ -180,6 +180,44 @@ describe('validateConnection', () => {
     expect(result.reason).toContain('already has a connection');
   });
 
+  it('rejects txngroup source connecting to non-txngroup target handle', () => {
+    const nodes = [
+      makeExtractorNode('ext'),
+      makeCalcNode('calc', 'sum'),
+    ];
+    const result = validateConnection(
+      { source: 'ext', target: 'calc', sourceHandle: 'txngroup:ds1', targetHandle: 'inputs' },
+      { nodes, edges: [] }
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('TxnGroup');
+  });
+
+  it('rejects non-txngroup source connecting to txngroup target handle', () => {
+    const nodes = [
+      makeExtractorNode('ext', [{ id: 'r1', dataType: 'number' }]),
+      makeCalcNode('calc', 'sum'),
+    ];
+    const result = validateConnection(
+      { source: 'ext', target: 'calc', sourceHandle: 'r1', targetHandle: 'txngroup:statementA' },
+      { nodes, edges: [] }
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('TxnGroup');
+  });
+
+  it('allows txngroup-to-txngroup handle connection', () => {
+    const nodes = [
+      makeExtractorNode('ext'),
+      makeCalcNode('calc', 'sum'),
+    ];
+    const result = validateConnection(
+      { source: 'ext', target: 'calc', sourceHandle: 'txngroup:ds1', targetHandle: 'txngroup:statementA' },
+      { nodes, edges: [] }
+    );
+    expect(result.valid).toBe(true);
+  });
+
   it('rejects single-input operation with existing connection', () => {
     const nodes = [
       makeExtractorNode('ext1', [{ id: 'r1', dataType: 'number' }]),

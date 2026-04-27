@@ -52,6 +52,20 @@ export function validateConnection(
     return { valid: false, reason: 'This node type cannot receive data' };
   }
 
+  // TxnGroup-typed handles: source handle id starts with "txngroup:" — payload
+  // is a TxnGroup reference, not a scalar. Targets must explicitly opt in by
+  // exposing a target handle whose id also starts with "txngroup:".
+  const sourceIsTxnGroup = connection.sourceHandle?.startsWith('txngroup:') ?? false;
+  const targetIsTxnGroup = connection.targetHandle?.startsWith('txngroup:') ?? false;
+  if (sourceIsTxnGroup !== targetIsTxnGroup) {
+    return {
+      valid: false,
+      reason: sourceIsTxnGroup
+        ? 'Transaction group can only connect to a TxnGroup input'
+        : 'TxnGroup input only accepts a transaction group',
+    };
+  }
+
   // ViewportNode targets: only accept from DisplayNode, max 1 input
   if (ViewportNode.is(targetNode)) {
     if (!DisplayNode.is(sourceNode)) {

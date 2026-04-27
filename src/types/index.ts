@@ -31,7 +31,7 @@ export type {
 } from './geometry';
 
 // Extracted regions and field detection
-export type { ExtractedRegion, FieldType, DetectedField } from './regions';
+export type { ExtractedRegion, ExtractorColumn, FieldType, DetectedField, TableRecord } from './regions';
 
 // Viewport types
 export type { ViewportRegion } from './viewport';
@@ -63,6 +63,8 @@ export type {
   LabelFormat,
   LabelNodeData,
   GroupNodeData,
+  MatchNodeData,
+  MatchPairRef,
   LynkNodeData,
   LynkNode,
 } from './nodes';
@@ -76,6 +78,7 @@ export {
   SheetNode,
   LabelNode,
   GroupNode,
+  MatchNode,
 } from './nodes';
 
 // Canvas state

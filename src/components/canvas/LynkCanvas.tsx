@@ -26,7 +26,6 @@ import { CanvasContextMenu } from './CanvasContextMenu';
 import { ProjectSidebar } from './ProjectSidebar';
 import { EmptyState } from './EmptyState';
 import { SuggestionBar } from './SuggestionBar';
-import { MultiHandleSelect } from './MultiHandleSelect';
 import { useToast } from '../ui/Toast';
 import { AiPromptPanel } from '../ai/AiPromptPanel';
 import type { AiConnectionSuggestion, AiDetectedField } from '../../types/ai';
@@ -57,6 +56,7 @@ export function LynkCanvas() {
   const storeOnEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const storeAddEdge = useCanvasStore((state) => state.addEdge);
+  const removeEdge = useCanvasStore((state) => state.removeEdge);
   const setViewport = useCanvasStore((state) => state.setViewport);
   const canvasId = useCanvasStore((state) => state.canvasId);
 
@@ -637,7 +637,6 @@ export function LynkCanvas() {
           <Controls />
           <LayoutControls />
         </ReactFlow>
-        <MultiHandleSelect />
         {isDragOver && (
           <div className="absolute inset-0 z-50 bg-copper-500/10 border-2 border-dashed border-copper-400 flex items-center justify-center pointer-events-none">
             <div className="bg-white/90 rounded-lg px-6 py-4 shadow-lg text-center">

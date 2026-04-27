@@ -115,7 +115,7 @@ export function RegionTable({
       {regions.length === 0 ? (
         <div className="px-3 py-3 text-xs text-bridge-400 text-center">No rows</div>
       ) : (
-        <div>
+        <div className="max-h-[280px] overflow-y-auto pr-3">
           {regions.map((region) => {
             const selected = selectedRegionId === region.id;
             const external = isExternallyHighlighted(region.id);

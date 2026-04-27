@@ -140,6 +140,46 @@ export async function extractTextFromRegion(
   };
 }
 
+/**
+ * Full-page OCR on a cropped rectangular region of the source image.
+ * Used by table-mode extraction where a user lasso'd a tabular area.
+ */
+export async function extractFullPageFromRegion(
+  imageSource: HTMLImageElement | HTMLCanvasElement | string,
+  region: RegionCoordinates,
+): Promise<FullPageOcrResult> {
+  let img: HTMLImageElement | HTMLCanvasElement;
+  if (typeof imageSource === 'string') {
+    img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Failed to load image for OCR'));
+      image.src = imageSource;
+    });
+  } else {
+    img = imageSource;
+  }
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Failed to get canvas context');
+  canvas.width = region.width;
+  canvas.height = region.height;
+  ctx.drawImage(
+    img,
+    region.x,
+    region.y,
+    region.width,
+    region.height,
+    0,
+    0,
+    region.width,
+    region.height,
+  );
+  return extractFullPage(canvas);
+}
+
 export async function extractTextFromPdfPage(
   pdfCanvas: HTMLCanvasElement,
   region: RegionCoordinates

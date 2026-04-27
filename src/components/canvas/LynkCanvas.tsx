@@ -62,8 +62,6 @@ export function LynkCanvas() {
 
   const fileRegistryOpen = useCanvasStore((state) => state.fileRegistryOpen);
   const toggleFileRegistry = useCanvasStore((state) => state.toggleFileRegistry);
-  const focusedGroupId = useCanvasStore((state) => state.focusedGroupId);
-  const setFocusedGroup = useCanvasStore((state) => state.setFocusedGroup);
   const { showToast } = useToast();
   const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
 
@@ -125,35 +123,6 @@ export function LynkCanvas() {
       })
       .filter((e): e is Edge => e !== null);
   }, [edges, collapsedChildToGroup]);
-
-  // Focus mode: compute which node IDs stay bright. Rule = focused group + its
-  // children + 1-hop edge neighbours, so a MatchNode (or extractor) wired into
-  // the focused group stays visible even if it sits outside the group.
-  const dimmedNodeIds = useMemo(() => {
-    if (!focusedGroupId) return null;
-    const focused = new Set<string>([focusedGroupId]);
-    for (const n of nodes) {
-      if (n.parentId === focusedGroupId) focused.add(n.id);
-    }
-    const visible = new Set(focused);
-    for (const e of edges) {
-      if (focused.has(e.source) && !focused.has(e.target)) visible.add(e.target);
-      else if (focused.has(e.target) && !focused.has(e.source)) visible.add(e.source);
-    }
-    const dimmed = new Set<string>();
-    for (const n of nodes) {
-      if (!visible.has(n.id)) dimmed.add(n.id);
-    }
-    return { dimmed, visible };
-  }, [focusedGroupId, nodes, edges]);
-
-  const focusedGroupLabel = useMemo(() => {
-    if (!focusedGroupId) return null;
-    const g = nodes.find((n) => n.id === focusedGroupId);
-    return g?.data && typeof (g.data as { label?: unknown }).label === 'string'
-      ? (g.data as { label: string }).label
-      : 'Group';
-  }, [focusedGroupId, nodes]);
 
   // Mirror child outputs onto collapsed group nodes so downstream resolveNodeOutput works
   const groupOutputsRef = useRef<string>('');
@@ -584,16 +553,6 @@ export function LynkCanvas() {
         {/* Bottom center: Node creation */}
         <NodeCreationBar />
 
-        {focusedGroupId && (
-          <button
-            onClick={() => setFocusedGroup(null)}
-            className="absolute top-20 left-1/2 -translate-x-1/2 z-30 bg-copper-500 text-white text-xs px-3 py-1.5 rounded-full shadow-lg hover:bg-copper-600 transition-colors flex items-center gap-2"
-            title="Exit focus mode"
-          >
-            <span>Focusing &ldquo;{focusedGroupLabel}&rdquo;</span>
-            <span className="opacity-70">Esc to exit</span>
-          </button>
-        )}
         {nodes.length === 0 && <EmptyState />}
         {magneticMode && (
           <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none
@@ -603,8 +562,8 @@ export function LynkCanvas() {
           </div>
         )}
         <ReactFlow
-          nodes={dimmedNodeIds ? processedNodes.map((n) => dimmedNodeIds.dimmed.has(n.id) ? { ...n, className: `${n.className ?? ''} lynk-dimmed`.trim() } : n) : processedNodes}
-          edges={dimmedNodeIds ? processedEdges.map((e) => dimmedNodeIds.dimmed.has(e.source) && dimmedNodeIds.dimmed.has(e.target) ? { ...e, className: `${e.className ?? ''} lynk-dimmed`.trim() } : e) : processedEdges}
+          nodes={processedNodes}
+          edges={processedEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}

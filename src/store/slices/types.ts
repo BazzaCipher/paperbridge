@@ -25,7 +25,6 @@ export interface CanvasStoreState {
   edges: Edge[];
   viewport: Viewport;
   highlightedHandle: string | null; // "nodeId:handleId" format
-  focusedGroupId: string | null;
 
   // Canvas metadata
   canvasName: string;

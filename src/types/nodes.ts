@@ -8,7 +8,7 @@
 import type { Node } from '@xyflow/react';
 import type { DataValue, SimpleDataType } from './data';
 import type { DataSourceReference } from './geometry';
-import type { ExtractedRegion, ExtractorColumn } from './regions';
+import type { ExtractedRegion } from './regions';
 import type { ViewportRegion } from './viewport';
 import type { DocumentView } from './view';
 import type { FileNodeData, Exportable, Importable } from './categories';
@@ -17,7 +17,7 @@ import type { FileNodeData, Exportable, Importable } from './categories';
 // NODE TYPE IDENTIFIERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export type LynkNodeType = 'display' | 'extractor' | 'calculation' | 'sheet' | 'label' | 'group' | 'viewport' | 'match';
+export type LynkNodeType = 'display' | 'extractor' | 'calculation' | 'sheet' | 'label' | 'group' | 'viewport';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // BASE NODE DATA
@@ -97,8 +97,6 @@ export interface ExtractorNodeData extends BaseNodeData, FileNodeData, Exportabl
   regions: ExtractedRegion[];
   currentPage: number;
   totalPages: number;
-  /** User-defined ledger columns. If omitted, defaults are applied at render time. */
-  columns?: ExtractorColumn[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -238,21 +236,6 @@ export interface GroupNodeData extends BaseNodeData {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MATCH NODE (reconciliation between two sources)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-import type { MatchConfig, MatchPair } from '../core/reconciliation/matchEngine';
-export type { MatchConfig, MatchPair, MatchMode, MatchStatus } from '../core/reconciliation/matchEngine';
-
-/** Match node specific data - reconciliation between two connected sources */
-export interface MatchNodeData extends BaseNodeData, Importable, Exportable {
-  config: MatchConfig;
-  pairs: MatchPair[];
-  unmatchedLeft: string[];
-  unmatchedRight: string[];
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // NODE DATA UNION
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -264,8 +247,7 @@ export type LynkNodeData =
   | CalculationNodeData
   | SheetNodeData
   | LabelNodeData
-  | GroupNodeData
-  | MatchNodeData;
+  | GroupNodeData;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // REACT FLOW NODE TYPES
@@ -279,10 +261,9 @@ export type CalculationNode = Node<CalculationNodeData, 'calculation'>;
 export type SheetNode = Node<SheetNodeData, 'sheet'>;
 export type LabelNode = Node<LabelNodeData, 'label'>;
 export type GroupNode = Node<GroupNodeData, 'group'>;
-export type MatchNode = Node<MatchNodeData, 'match'>;
 
 /** Union type for all node types */
-export type LynkNode = DisplayNode | ViewportNode | ExtractorNode | CalculationNode | SheetNode | LabelNode | GroupNode | MatchNode;
+export type LynkNode = DisplayNode | ViewportNode | ExtractorNode | CalculationNode | SheetNode | LabelNode | GroupNode;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPE GUARDS (runtime type checking)
@@ -328,10 +309,4 @@ export const LabelNode = {
 export const GroupNode = {
   type: 'group' as const,
   is: (node: LynkNode): node is GroupNode => node.type === 'group',
-};
-
-/** Type guard and utilities for MatchNode */
-export const MatchNode = {
-  type: 'match' as const,
-  is: (node: LynkNode): node is MatchNode => node.type === 'match',
 };

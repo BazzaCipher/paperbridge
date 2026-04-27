@@ -37,11 +37,8 @@ function setCollapsedState(groupId: string, collapsed: boolean) {
 
 export function GroupNode({ id, data, selected }: NodeProps<GroupNodeType>) {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const focusedGroupId = useCanvasStore((state) => state.focusedGroupId);
-  const setFocusedGroup = useCanvasStore((state) => state.setFocusedGroup);
   const allEdges = useEdges();
   const collapsed = data.collapsed ?? false;
-  const isFocused = focusedGroupId === id;
 
   // Derive dynamic handles for collapsed view from remapped edges
   const { outHandles, inHandles } = useMemo(() => {
@@ -85,40 +82,20 @@ export function GroupNode({ id, data, selected }: NodeProps<GroupNodeType>) {
     }
   }, [id, editValue, data.label, updateNodeData]);
 
-  const toggleFocus = useCallback(() => {
-    setFocusedGroup(isFocused ? null : id);
-  }, [id, isFocused, setFocusedGroup]);
-
-  // Single click = collapse/expand, double click = toggle focus mode.
-  // Rename is available via F2 / Enter when the group is selected.
+  // Single click = toggle, double click = rename
   const handleNameClick = useCallback(() => {
     if (editing) return;
     if (clickTimerRef.current) {
       clearTimeout(clickTimerRef.current);
       clickTimerRef.current = null;
-      toggleFocus();
+      startEditing();
     } else {
       clickTimerRef.current = setTimeout(() => {
         clickTimerRef.current = null;
         toggleCollapse();
       }, 250);
     }
-  }, [editing, toggleFocus, toggleCollapse]);
-
-  // F2 / Enter on a selected group starts renaming.
-  useEffect(() => {
-    if (!selected || editing) return;
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      if (e.key === 'F2' || (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey)) {
-        e.preventDefault();
-        startEditing();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [selected, editing, startEditing]);
+  }, [editing, startEditing, toggleCollapse]);
 
   const handleStyle = {
     background: '#9c8468',
@@ -152,7 +129,7 @@ export function GroupNode({ id, data, selected }: NodeProps<GroupNodeType>) {
             <h3
               className="text-sm font-semibold text-bridge-700 truncate cursor-pointer"
               onClick={handleNameClick}
-              title="Click to expand, double-click to focus (F2 to rename)"
+              title="Click to expand, double-click to rename"
             >
               {data.label}
             </h3>
@@ -213,7 +190,7 @@ export function GroupNode({ id, data, selected }: NodeProps<GroupNodeType>) {
   // Expanded view: original dashed style
   return (
     <div
-      className={`rounded-xl transition-colors border-2 border-dashed ${isFocused ? 'border-copper-500 bg-copper-400/10 ring-2 ring-copper-400/40' : selected ? 'border-copper-400 bg-copper-400/20/60' : 'border-paper-200 bg-paper-50/30'}`}
+      className={`rounded-xl transition-colors border-2 border-dashed ${selected ? 'border-copper-400 bg-copper-400/20/60' : 'border-paper-200 bg-paper-50/30'}`}
       style={{
         width: data.width,
         height: data.height,
@@ -240,7 +217,7 @@ export function GroupNode({ id, data, selected }: NodeProps<GroupNodeType>) {
         ) : (
           <span
             onClick={handleNameClick}
-            title="Click to collapse, double-click to focus (F2 to rename)"
+            title="Click to collapse, double-click to rename"
           >
             {data.label}
           </span>

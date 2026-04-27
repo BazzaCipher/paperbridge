@@ -6,16 +6,13 @@ import { DocumentViewer } from './file/DocumentViewer';
 import { RegionSelector } from './file/RegionSelector';
 import { HighlightOverlay } from './file/HighlightOverlay';
 import { RegionList } from './file/RegionList';
-import { RegionTable } from './file/RegionTable';
-import { DEFAULT_EXTRACTOR_COLUMNS } from '../canvas/nodeDefaults';
 import { FileNodePreview } from './file/FileNodePreview';
 import { Modal } from '../ui/Modal';
 import { ZoomControls } from '../ui/ZoomControls';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { FileDropZone } from '../ui/FileDropZone';
-import { extractTextFromRegion, extractFullPage, extractFullPageFromRegion } from '../../core/extraction/ocrExtractor';
+import { extractTextFromRegion, extractFullPage } from '../../core/extraction/ocrExtractor';
 import { detectFields, fieldOverlapsExisting } from '../../core/extraction/fieldDetector';
-import { parseTableFromOcr } from '../../core/extraction/tableParser';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useToast } from '../ui/Toast';
 import { useFileNode } from '../../hooks/useFileNode';
@@ -24,7 +21,6 @@ import { useSyncNodeOutputs } from '../../hooks/useSyncNodeOutputs';
 import { useDocumentZoom } from '../../hooks/useDocumentZoom';
 import { getColorForType, getCompatibleTypes } from '../../utils/colors';
 import { generateId } from '../../utils/id';
-import { parseCsv } from '../../utils/csvParser';
 import { createRegionFromBox, createRegionFromText } from '../../utils/regions';
 import { BlobRegistry } from '../../store/canvasPersistence';
 import { FilePickerModal } from '../ui/FilePickerModal';
@@ -33,7 +29,6 @@ import type {
   NodeOutput,
   RegionCoordinates,
   ExtractedRegion,
-  ExtractorColumn,
   TextRange,
   SimpleDataType,
   DisplayNodeData,
@@ -60,8 +55,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
   const [, setViewerHeight] = useState(400);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [selectionMode, setSelectionMode] = useState<'select' | 'box' | 'text' | 'table'>('box');
-  const [isTableExtracting, setIsTableExtracting] = useState(false);
+  const [selectionMode, setSelectionMode] = useState<'select' | 'box' | 'text'>('box');
   const [pageOffsets, setPageOffsets] = useState<Map<number, number>>(new Map());
   const [pdfError, setPdfError] = useState<string | null>(null);
   const imageRef = useRef<HTMLImageElement | HTMLCanvasElement | null>(null);
@@ -180,125 +174,6 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     [id, data.regions, data.currentPage, updateNodeData]
   );
 
-  const handleTableExtract = useCallback(
-    async (coordinates: RegionCoordinates, pageNumber?: number) => {
-      if (!data.fileUrl) {
-        showToast('No document loaded', 'error');
-        return;
-      }
-      let imageSource: HTMLImageElement | HTMLCanvasElement | string;
-      if (imageRef.current) {
-        imageSource = imageRef.current;
-      } else if (data.fileType === 'image') {
-        imageSource = data.fileUrl;
-      } else {
-        showToast('Document not ready. Please wait and try again.', 'warning');
-        return;
-      }
-
-      setIsTableExtracting(true);
-      try {
-        const ocr = await extractFullPageFromRegion(imageSource, coordinates);
-        const table = parseTableFromOcr(ocr);
-        if (table.headers.length === 0 || table.rows.length === 0) {
-          showToast('No table structure detected in selection', 'warning');
-          return;
-        }
-
-        // Merge headers into existing columns: first header maps to built-in
-        // "label" column; remaining headers reuse an existing custom column
-        // (case-insensitive label match) or create new ones.
-        const existingCols = data.columns ?? DEFAULT_EXTRACTOR_COLUMNS;
-        const byLabel = new Map(
-          existingCols.map((c) => [c.label.toLowerCase(), c] as const),
-        );
-        const mappedColIds: string[] = [];
-        const nextCols: ExtractorColumn[] = [...existingCols];
-
-        table.headers.forEach((h, i) => {
-          if (i === 0) {
-            mappedColIds.push('label');
-            return;
-          }
-          const existing = byLabel.get(h.toLowerCase());
-          if (existing && existing.id !== 'label') {
-            mappedColIds.push(existing.id);
-            return;
-          }
-          const newCol: ExtractorColumn = {
-            id: generateId('col'),
-            label: h,
-            dataType: 'string',
-          };
-          nextCols.push(newCol);
-          byLabel.set(h.toLowerCase(), newCol);
-          mappedColIds.push(newCol.id);
-        });
-
-        const page = pageNumber ?? data.currentPage;
-        const newRegions: ExtractedRegion[] = table.rows.map((r) => {
-          const cells: Record<string, string> = {};
-          let label = '';
-          let valueCell = '';
-          mappedColIds.forEach((colId, i) => {
-            const v = r[i] ?? '';
-            if (colId === 'label') label = v;
-            else if (colId === 'value') valueCell = v;
-            else cells[colId] = v;
-          });
-          return {
-            id: generateId('region'),
-            label,
-            selectionType: 'box',
-            coordinates,
-            pageNumber: page,
-            extractedData: {
-              type: 'string',
-              value: valueCell,
-              source: {
-                nodeId: id,
-                regionId: '',
-                pageNumber: page,
-                coordinates,
-                extractionMethod: 'ocr',
-                confidence: ocr.confidence,
-              },
-            },
-            dataType: 'string',
-            color: getColorForType('string').border,
-            cells,
-          };
-        });
-
-        updateNodeData(id, {
-          columns: nextCols,
-          regions: [...data.regions, ...newRegions],
-        });
-        showToast(
-          `Extracted ${newRegions.length} row(s) across ${table.headers.length} column(s)`,
-          'success',
-        );
-      } catch (err) {
-        console.error('Table extraction failed:', err);
-        showToast('Table extraction failed', 'error');
-      } finally {
-        setIsTableExtracting(false);
-      }
-    },
-    [id, data.fileUrl, data.fileType, data.columns, data.regions, data.currentPage, updateNodeData, showToast],
-  );
-
-  const handleBoxDraw = useCallback(
-    (coordinates: RegionCoordinates, pageNumber?: number) => {
-      if (selectionMode === 'table') {
-        void handleTableExtract(coordinates, pageNumber);
-        return;
-      }
-      handleRegionCreate(coordinates, pageNumber);
-    },
-    [selectionMode, handleTableExtract, handleRegionCreate],
-  );
-
   const handleTextSelect = useCallback(
     (textRange: TextRange) => {
       const newRegion = createRegionFromText(textRange, data.currentPage, data.regions.length);
@@ -371,149 +246,6 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     },
     [id, data.regions, updateNodeData]
   );
-
-  const columns: ExtractorColumn[] = data.columns ?? DEFAULT_EXTRACTOR_COLUMNS;
-
-  const handleColumnsChange = useCallback(
-    (next: ExtractorColumn[]) => {
-      updateNodeData(id, { columns: next });
-    },
-    [id, updateNodeData],
-  );
-
-  const handleCellChange = useCallback(
-    (regionId: string, columnId: string, value: string) => {
-      updateNodeData(id, {
-        regions: data.regions.map((r) => {
-          if (r.id !== regionId) return r;
-          if (columnId === 'label') return { ...r, label: value };
-          if (columnId === 'value') {
-            return {
-              ...r,
-              extractedData: { ...r.extractedData, value },
-              ...(r.selectionType === 'text' && r.textRange
-                ? { textRange: { ...r.textRange, text: value } }
-                : {}),
-            };
-          }
-          return { ...r, cells: { ...(r.cells ?? {}), [columnId]: value } };
-        }),
-      });
-    },
-    [id, data.regions, updateNodeData],
-  );
-
-  const handleCsvImport = useCallback(
-    async (file: File) => {
-      try {
-        const text = await file.text();
-        const { headers, rows } = parseCsv(text);
-        if (headers.length === 0 || rows.length === 0) {
-          showToast('CSV appears empty', 'warning');
-          return;
-        }
-
-        // Merge columns: built-in "label" maps to the first header; remaining
-        // headers become custom columns (reusing existing IDs by label match).
-        const existingCols = data.columns ?? DEFAULT_EXTRACTOR_COLUMNS;
-        const byLabel = new Map(
-          existingCols.map((c) => [c.label.toLowerCase(), c] as const),
-        );
-        const mappedHeaderColIds: string[] = [];
-        const nextCols: ExtractorColumn[] = [...existingCols];
-
-        headers.forEach((h, i) => {
-          if (i === 0) {
-            mappedHeaderColIds.push('label');
-            return;
-          }
-          const existing = byLabel.get(h.toLowerCase());
-          if (existing && existing.id !== 'label') {
-            mappedHeaderColIds.push(existing.id);
-            return;
-          }
-          const newCol: ExtractorColumn = {
-            id: generateId('col'),
-            label: h,
-            dataType: 'string',
-          };
-          nextCols.push(newCol);
-          byLabel.set(h.toLowerCase(), newCol);
-          mappedHeaderColIds.push(newCol.id);
-        });
-
-        const newRegions: ExtractedRegion[] = rows.map((r) => {
-          const cells: Record<string, string> = {};
-          let label = '';
-          let valueCell = '';
-          mappedHeaderColIds.forEach((colId, i) => {
-            const v = r[i] ?? '';
-            if (colId === 'label') {
-              label = v;
-            } else if (colId === 'value') {
-              valueCell = v;
-            } else {
-              cells[colId] = v;
-            }
-          });
-          return {
-            id: generateId('region'),
-            label,
-            selectionType: 'manual',
-            pageNumber: data.currentPage,
-            extractedData: { type: 'string', value: valueCell },
-            dataType: 'string',
-            color: getColorForType('string').border,
-            cells,
-          };
-        });
-
-        updateNodeData(id, {
-          columns: nextCols,
-          regions: [...data.regions, ...newRegions],
-        });
-        showToast(`Imported ${newRegions.length} row(s) from CSV`, 'success');
-      } catch (err) {
-        console.error('CSV import failed:', err);
-        showToast('Failed to parse CSV', 'error');
-      }
-    },
-    [id, data.columns, data.regions, data.currentPage, updateNodeData, showToast],
-  );
-
-  const isCsvFile = (f: File) =>
-    f.type === 'text/csv' ||
-    f.type === 'application/csv' ||
-    /\.csv$/i.test(f.name) ||
-    /\.tsv$/i.test(f.name);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      const files = e.dataTransfer?.files;
-      if (files && files.length > 0 && isCsvFile(files[0])) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleCsvImport(files[0]);
-        return;
-      }
-      handleFileDrop(e);
-    },
-    [handleFileDrop, handleCsvImport],
-  );
-
-  const handleAddRow = useCallback(() => {
-    const newRegion: ExtractedRegion = {
-      id: generateId('region'),
-      label: '',
-      selectionType: 'manual',
-      pageNumber: data.currentPage,
-      extractedData: { type: 'string', value: '' },
-      dataType: 'string',
-      color: getColorForType('string').border,
-      cells: {},
-    };
-    updateNodeData(id, { regions: [...data.regions, newRegion] });
-  }, [id, data.regions, data.currentPage, updateNodeData]);
 
   const handleValueChange = useCallback(
     (regionId: string, value: string) => {
@@ -775,7 +507,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       <BaseNode label={data.label} selected={selected} className="w-[280px]" hideHeader={!!data.compressed}>
         {/* File info and open button */}
         <div
-          onDrop={handleDrop}
+          onDrop={handleFileDrop}
           onDragOver={handleDragOver}
         >
           {data.fileUrl ? (
@@ -805,7 +537,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
             <div className="p-2">
               <FileDropZone
                 onFileSelect={handleFileSelect}
-                onDrop={handleDrop}
+                onDrop={handleFileDrop}
                 onDragOver={handleDragOver}
                 compact
                 onPickFromRegistry={() => setIsPickerOpen(true)}
@@ -814,17 +546,16 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           )}
         </div>
 
-        {/* Ledger table: columns + cells, with inline editing */}
-        <RegionTable
+        {/* Compact region list with values - no OCR button here */}
+        <RegionList
           regions={data.regions}
-          columns={columns}
           selectedRegionId={selectedRegionId}
-          nodeId={id}
           onRegionSelect={handleRegionSelect}
           onRegionDelete={handleRegionDelete}
-          onColumnsChange={handleColumnsChange}
-          onCellChange={handleCellChange}
-          onAddRow={handleAddRow}
+          onRegionLabelChange={handleRegionLabelChange}
+          onRegionDataTypeChange={handleRegionDataTypeChange}
+          compact
+          nodeId={id}
         />
       </BaseNode>
 
@@ -871,20 +602,6 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                   <path d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm0 2h10v10H5V5z" />
                 </svg>
                 Box
-              </button>
-              <button
-                onClick={() => setSelectionMode('table')}
-                className={`px-3 py-1.5 text-xs rounded-md transition-colors flex items-center gap-1.5 ${
-                  selectionMode === 'table'
-                    ? 'bg-copper-500 text-white shadow-sm'
-                    : 'bg-paper-100 text-bridge-600 hover:bg-paper-200'
-                }`}
-                title="Draw a box around a table to extract rows and columns"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 1v3h4V5H5zm6 0v3h4V5h-4zM5 10v2h4v-2H5zm6 0v2h4v-2h-4zM5 14v1h4v-1H5zm6 0v1h4v-1h-4z" clipRule="evenodd" />
-                </svg>
-                {isTableExtracting ? 'Extracting...' : 'Table'}
               </button>
               {data.fileType === 'pdf' && (
                 <button
@@ -971,7 +688,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                       currentPage={data.currentPage}
                       selectedRegionId={selectedRegionId}
                       onRegionSelect={handleRegionSelect}
-                      interactive={selectionMode === 'select' || selectionMode === 'box' || selectionMode === 'table'}
+                      interactive={selectionMode === 'select' || selectionMode === 'box'}
                       nodeId={id}
                       scrollMode={true}
                       pageOffsets={pageOffsets}
@@ -980,9 +697,9 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                 </DocumentViewer>
               </div>
               {/* RegionSelector fills entire viewer area — allows drawing outside the page */}
-              {data.fileUrl && (selectionMode === 'box' || selectionMode === 'table') && (
+              {data.fileUrl && selectionMode === 'box' && (
                 <RegionSelector
-                  onRegionCreate={handleBoxDraw}
+                  onRegionCreate={handleRegionCreate}
                   documentRef={documentRef}
                   pageOffsets={pageOffsets}
                   zoom={zoom}
@@ -1020,8 +737,6 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
               ? 'Click on a highlight to select it.'
               : selectionMode === 'box'
               ? 'Draw a box to create a field.'
-              : selectionMode === 'table'
-              ? 'Draw a box around a table to extract rows and columns.'
               : 'Select text directly to create a field with that value.'}
           </span>
           <span className="text-bridge-400">

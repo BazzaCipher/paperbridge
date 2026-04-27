@@ -1,10 +1,5 @@
-import type { DisplayNodeData, ExtractorNodeData, ExtractorColumn, CalculationNodeData, SheetNodeData, LabelNodeData, MatchNodeData } from '../../types';
+import type { DisplayNodeData, ExtractorNodeData, CalculationNodeData, SheetNodeData, LabelNodeData } from '../../types';
 import { createImageView } from '../../types';
-
-export const DEFAULT_EXTRACTOR_COLUMNS: ExtractorColumn[] = [
-  { id: 'label', label: 'Label', dataType: 'string' },
-  { id: 'value', label: 'Value', dataType: 'string' },
-];
 
 export const defaultExtractorData: ExtractorNodeData = {
   label: 'Extractor',
@@ -14,8 +9,6 @@ export const defaultExtractorData: ExtractorNodeData = {
   regions: [],
   currentPage: 1,
   totalPages: 1,
-  columns: DEFAULT_EXTRACTOR_COLUMNS,
-  compressed: true,
 };
 
 export const defaultDisplayData: DisplayNodeData = {
@@ -49,13 +42,5 @@ export const defaultLabelData: LabelNodeData = {
   value: undefined,
   fontSize: 'medium',
   alignment: 'center',
-};
-
-export const defaultMatchData: MatchNodeData = {
-  label: 'Match',
-  config: { mode: 'exact' },
-  pairs: [],
-  unmatchedLeft: [],
-  unmatchedRight: [],
 };
 

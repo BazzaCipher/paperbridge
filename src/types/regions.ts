@@ -56,14 +56,4 @@ export interface ExtractedRegion {
   color: string;
   /** Cached values per data type */
   valueCache?: Partial<Record<SimpleDataType, string>>;
-  /** Per-column cell values for user-defined columns (Part 1 of reconciliation plan) */
-  cells?: Record<string, string>;
-}
-
-/** User-defined column on an ExtractorNode ledger table */
-export interface ExtractorColumn {
-  id: string;
-  label: string;
-  dataType: SimpleDataType;
-  width?: number;
 }

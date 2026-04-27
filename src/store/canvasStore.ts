@@ -78,11 +78,7 @@ interface CanvasStore {
   // Viewport region actions
   updateViewportRegion: (nodeId: string, viewportId: string, updates: Partial<ViewportRegion>) => void;
 
-  // Group state
-  focusedGroupId: string | null;
-
   // Group actions
-  setFocusedGroup: (groupId: string | null) => void;
   createGroup: (nodeIds: string[]) => string | null;
   ungroupNodes: (groupId: string) => void;
   getSelectedNodes: () => LynkNode[];

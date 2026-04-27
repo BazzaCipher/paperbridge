@@ -237,17 +237,3 @@ html { scroll-behavior: smooth; }
   .hero-illo-enter { opacity: 1; }
   .reveal, .reveal-left, .reveal-right, .reveal-scale { opacity: 1; transform: none; }
 }
-
-
-/* ─── Focus mode dim ──────────────────────────────────── */
-
-.react-flow__node.lynk-dimmed {
-  opacity: 0.15;
-  pointer-events: none;
-  transition: opacity 150ms ease;
-}
-.react-flow__edge.lynk-dimmed {
-  opacity: 0.15;
-  pointer-events: none;
-  transition: opacity 150ms ease;
-}

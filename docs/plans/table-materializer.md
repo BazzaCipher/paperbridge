@@ -116,37 +116,111 @@ A materialized bank-statement table is a *dataset*, not a per-row visual artifac
 
 This is **not** a new node type. The dataset travels along an existing edge between existing nodes, just with a richer type than `text`.
 
-**Shape carried on a `bank` handle**
+### Shape
 
 ```ts
-interface BankDataset {
-  account?: string;
-  currency?: string;
-  statementPeriod?: { from: string; to: string };
-  transactions: BankTransaction[];
-  origin: { fileId: string; pageRange: [number, number] };
+// src/core/sources/bankDataset.ts
+export interface BankTransaction {
+  id: string;             // stable hash of date+amount+description for dedupe across re-extracts
+  date: string;           // ISO date "YYYY-MM-DD"
+  description: string;
+  amount: number;         // signed; debit negative, credit positive
+  balance?: number;       // running balance if present in the statement
+  raw: Record<string, string>; // every original cell keyed by header label
 }
 
-interface BankTransaction {
-  id: string;
-  date: string;        // ISO
-  description: string;
-  amount: number;      // signed; debit negative, credit positive
-  balance?: number;
-  raw: Record<string, string>; // unmapped original cells
+export interface BankDataset {
+  account?: string;
+  currency?: string;      // ISO 4217, e.g. "AUD"
+  statementPeriod?: { from: string; to: string };
+  openingBalance?: number;
+  closingBalance?: number;
+  transactions: BankTransaction[];
+  origin: {
+    fileId: string;
+    pageRange: [number, number];
+    extractedAt: string;  // ISO timestamp
+    sourceHeaders: string[]; // original header labels for traceability
+  };
 }
 ```
 
-**How it slots in**
+### Adapter
 
-- Register `bank` in the handle/datatype system (find where `text` / `number` are registered). Includes color, icon, compatibility rules.
-- When the Extractor's table output is designated as a bank statement, it exposes one `bank`-typed output handle carrying the dataset, instead of writing N row regions. Conversion happens via a `materializedTableToBank` adapter.
-- Extractor UI shows a small bank-summary chip on that handle: account, period, txn count, totals in/out. Optional collapsed disclosure to peek at rows.
-- `MatchNode` gains an input port that accepts `bank` (and likely two for statement-vs-ledger reconciliation). Reconciliation rules (amount + date-window match, fuzzy description match) become first-class because the type is known.
+```ts
+// src/core/sources/bankDataset.ts
+export interface BankColumnMapping {
+  date: string;            // header label that maps to BankTransaction.date
+  description: string;
+  amount?: string;         // single signed amount column
+  debit?: string;          // OR debit + credit pair (CBA-style)
+  credit?: string;
+  balance?: string;
+}
 
-**Extractor toggle**
+export function materializedTableToBank(
+  table: MaterializedTable,
+  mapping: BankColumnMapping,
+  meta: {
+    fileId: string;
+    pageRange: [number, number];
+    account?: string;
+    currency?: string;
+    statementPeriod?: { from: string; to: string };
+  },
+): BankDataset;
+```
 
-Small switch in the table-selection flow: "Output as: Regions | Bank". Default heuristic: if AI-detected headers match a bank-ish schema (date / description / amount), suggest Bank with user confirm. Otherwise the existing region-per-row behavior is used.
+Mapping is supplied either by user picks (dropdowns per header in the Extractor toggle UI) or by an auto-suggest pass — see *Auto-detect* below. Date strings are normalized via `normalizeDate(raw, hintFormat?)` (a small util that handles `DD/MM/YYYY`, `YYYY-MM-DD`, and `DD MMM YYYY`). Amount strings are normalized via `parseSignedAmount(raw, { negativeParens: true, currencySymbols: true })`.
+
+### Auto-detect mapping
+
+`suggestBankMapping(table: MaterializedTable): { mapping: BankColumnMapping | null; confidence: number }`:
+- Score each header against keyword sets: `/date|posted|trans/i`, `/desc|narr|details|ref/i`, `/amount|amt/i`, `/debit|withdraw/i`, `/credit|deposit/i`, `/balance/i`.
+- Boost score with sample-row content checks: column with 80%+ rows matching `/^\d{1,2}[\/\- ]\d{1,2}[\/\- ]\d{2,4}$/` is `date`; column with 80%+ rows matching `/^[\$\-\(]?[\d,]+\.\d{2}\)?$/` is amount/debit/credit/balance.
+- Confidence threshold (e.g. 0.7) gates whether the Extractor *suggests* Bank output without prompting.
+
+### Registry / type system locations
+
+After the revert, the relevant places (verify before editing):
+
+- `src/types/regions.ts` and `src/types/categories.ts` — current `DataValue` / category types. Add a `bank` data category and a `BankDatasetValue` variant of `DataValue` carrying `BankDataset` (or a reference to a stored dataset; see *Store* below).
+- `src/core/engine/connectionValidation.ts` — connection compatibility matrix. `bank` outputs accept `bank` inputs only (no implicit coercion to `text` initially; revisit if needed).
+- `src/components/canvas/nodeDefaults.ts` — handle color/icon defaults. Pick a distinct color (e.g. emerald) and an icon for `bank`.
+- `src/store/canvasStore.ts` / a new `src/store/slices/bankSlice.ts` — datasets are heavy; **store them by id** in a `bankDatasets: Record<string, BankDataset>` slice, and have the handle payload carry only `{ kind: 'bank', datasetId }`. Keeps node JSON small and re-renders cheap.
+
+### How it slots in
+
+- Extractor table flow: after `materializeTable` returns, run `suggestBankMapping`. If confidence >= threshold, show "Detected bank statement — output as Bank?" (Yes / No). On Yes: `materializedTableToBank(...)` → store via `bankSlice.add` → expose a `bank`-typed output handle whose payload is `{ kind: 'bank', datasetId }`.
+- Extractor UI shows a small chip on the `bank` handle: account, period, `N txns`, `Σ in / Σ out`. Click expands a popover with the first ~10 rows.
+- Region list is **not** populated with N row regions when Bank output is chosen. The visual table overlay (step 4 separators) stays on the page for editability, but rows live in the dataset.
+- `MatchNode` gains two `bank`-typed input ports (`statementA`, `statementB`) and runs reconciliation. Output is a `MatchResult` typed handle (existing or new `match` datatype — defer until step 7).
+
+### Reconciliation primitives (step 7)
+
+```ts
+// src/core/match/bankReconciliation.ts
+export interface ReconcileOptions {
+  amountTolerance: number;   // absolute, e.g. 0.01
+  dateWindowDays: number;    // e.g. 3 (CC posting lag)
+  descriptionMinSimilarity: number; // 0-1 (Dice or token-set ratio)
+}
+
+export interface MatchedPair { a: BankTransaction; b: BankTransaction; score: number; reasons: string[]; }
+export interface ReconcileResult {
+  matched: MatchedPair[];
+  onlyInA: BankTransaction[];
+  onlyInB: BankTransaction[];
+}
+
+export function reconcile(a: BankDataset, b: BankDataset, opts: ReconcileOptions): ReconcileResult;
+```
+
+Algorithm: signed-amount equality (within tolerance) is hard gate; date within window is hard gate; description similarity tie-breaks ambiguous matches. Greedy assignment ordered by descending score. No global-optimal Hungarian; pragmatic and explainable.
+
+### Extractor toggle
+
+Small switch in the table-selection flow: "Output as: Regions | Bank". Default to whichever `suggestBankMapping` recommends. User can flip without re-running OCR.
 
 ---
 
@@ -169,16 +243,33 @@ Small switch in the table-selection flow: "Output as: Regions | Bank". Default h
 
 ## Order of work
 
-0. Land the revert + salvage PR (Step 0 above). All later steps assume that base.
-1. Add `tableMaterializer.ts` + tests. No UI change.
-2. Refactor salvaged `parseTableFromOcr` to emit a `TableSelection` and route through `materializeTable`. Behavior unchanged. Proves the seam.
-3. Add `detectTableWithAI` in `aiService.ts`. Switch table mode to prefer it, falling back to heuristic.
+0. ✅ **DONE.** Revert + salvage landed on `preview` (commits `ec1d9cf..ee09c1e`). Salvaged: `extractFullPageFromRegion`, `tableParser.ts` heuristic, `MultiHandleSelect.tsx`, fixtures.
+1. ✅ **DONE** (`45a46ee`). `tableMaterializer.ts` with `TableSelection` / `MaterializedTable` / `materializeTable`. 3 vitest cases.
+2. ✅ **DONE** (`45a46ee`). `parseTableFromOcr` refactored to build a `TableSelection` via `buildTableSelectionFromOcr` then route through `materializeTable`. 3 heuristic tests still pass.
+3. 🟡 **PARTIAL** (`539f3e2`). Service-layer done: `detect_table` mode + system prompt in `api/ai/chat.ts`, `detectTableWithAI` in `aiService.ts` returning a validated `TableSelection`. **NOT DONE:** wiring into `ExtractorNode` — there is no `'table'` selection mode in the post-revert UI. See Step 3b below.
 4. Add draggable separator handles on the canvas overlay. Persist `TableSelection` per region.
 5. Register the `bank` datatype. Add `bankDataset.ts` types + `materializedTableToBank` adapter + tests against CBA / NAB fixtures.
 6. Wire Extractor's table mode to emit on a `bank`-typed output handle when chosen. Add Output mode toggle.
 7. Extend `MatchNode` to accept `bank` inputs and run reconciliation primitives.
 
 Steps 1-2 are safe refactors. Steps 3-4 are additive UX. Steps 5-7 deliver the new datatype end to end.
+
+### Step 3b — wire `'table'` mode into ExtractorNode (new, picked up here)
+
+The reverted "Setup table systems" commit introduced the `'table'` toolbar mode and `handleTableExtract`. Both are gone. To resume:
+
+1. Extend `selectionMode` union in `src/components/nodes/ExtractorNode.tsx:58` to `'select' | 'box' | 'text' | 'table'`.
+2. Add a toolbar button alongside the existing select/box/text triple. Reuse the `box` interaction model — same drag-bbox behavior, different submit handler.
+3. Add `handleTableExtract(region: RegionCoordinates)`:
+   - call `extractFullPageFromRegion(imageSource, region)` → `FullPageOcrResult`
+   - convert `region` to normalized 0-1 page coords via the existing page-size plumbing (used by `box` mode)
+   - if AI is enabled (existing `aiSettings` check used by `detectFieldsWithAI`), call `detectTableWithAI({ images, ocrWords, hintBbox })`. Else fall back to `buildTableSelectionFromOcr(ocr)?.selection`.
+   - call `materializeTable(selection, ocr, pageSize)` → `MaterializedTable`
+   - persist `selection` on the created region (new field on `RegionCoordinates` or sibling table-region type — TBD when step 4 lands)
+   - emit one region per row using the existing region-creation path (until step 6 swaps in the `bank` handle)
+4. Toast on success/error mirroring the existing `box` flow.
+
+This keeps step 3b additive and unblocks step 4 (which needs a persisted `TableSelection` to drag).
 
 ---
 

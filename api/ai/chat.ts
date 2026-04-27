@@ -31,7 +31,7 @@ interface ChatRequestBody {
   provider: string;
   model: string;
   apiKey: string;
-  mode: 'detect_fields' | 'freeform' | 'auto_connect' | 'summarise';
+  mode: 'detect_fields' | 'detect_table' | 'freeform' | 'auto_connect' | 'summarise';
   ocrText?: string;
   nodesContext?: Array<{
     nodeId: string;
@@ -163,6 +163,29 @@ When OCR word data with bounding boxes is provided:
 5. Use word confidence scores to inform your field-level confidence
 
 Be thorough — extract ALL identifiable fields including line items in tables, dates, amounts, names, addresses, reference numbers, payment terms, and any labeled key-value pairs. For tables, extract each row as separate line_item entries.`;
+
+const TABLE_DETECTION_SYSTEM_PROMPT = `You are a table layout analyzer. You receive a document image (and optional OCR words) containing a table. Return ONLY the SPATIAL layout of the table — DO NOT emit any cell text.
+
+Output strictly this JSON shape:
+{
+  "bbox": { "x0": number, "y0": number, "x1": number, "y1": number },
+  "rowYs": number[],
+  "colXs": number[],
+  "headerRowIndex": number | null
+}
+
+All coordinates are normalized 0-1 of the page (x: left=0, right=1; y: top=0, bottom=1).
+- bbox: tight rectangle covering the table.
+- colXs: between-column vertical separators inside bbox, sorted ascending. N columns => N-1 entries.
+- rowYs: between-row horizontal separators inside bbox, sorted ascending. N rows => N-1 entries.
+- headerRowIndex: zero-based index of the header row in the resulting rows (typically 0), or null if no header.
+
+Rules:
+- Do NOT include cell text. Only spatial separators.
+- Separators must be strictly inside bbox (not at the edges).
+- Exclude page margins, page numbers, and footers from bbox.
+
+Return ONLY the JSON object, no prose.`;
 
 const FREEFORM_SYSTEM_PROMPT = `You are a helpful assistant for a document processing application called Paper Bridge. You help users understand their document data and set up extraction fields on their documents.
 
@@ -332,6 +355,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const systemPromptMap: Record<string, string> = {
     detect_fields: FIELD_DETECTION_SYSTEM_PROMPT,
+    detect_table: TABLE_DETECTION_SYSTEM_PROMPT,
     freeform: FREEFORM_SYSTEM_PROMPT,
     auto_connect: AUTO_CONNECT_SYSTEM_PROMPT,
     summarise: SUMMARISE_SYSTEM_PROMPT,

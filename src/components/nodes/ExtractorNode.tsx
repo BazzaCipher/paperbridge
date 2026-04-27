@@ -16,7 +16,6 @@ import { FileDropZone } from '../ui/FileDropZone';
 import { extractTextFromRegion, extractFullPage, extractFullPageFromRegion } from '../../core/extraction/ocrExtractor';
 import { detectFields, fieldOverlapsExisting } from '../../core/extraction/fieldDetector';
 import { parseTableFromOcr } from '../../core/extraction/tableParser';
-import { pdfjs } from 'react-pdf';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useAiSettings } from '../../hooks/useAiSettings';
 import { detectFieldsWithAI } from '../../services/aiService';
@@ -617,26 +616,8 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     } else if (data.fileType === 'image') {
       imageSource = data.fileUrl;
     } else {
-      // Render the current PDF page off-screen so auto-detect works
-      // without first opening the viewer.
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const pdf = await (pdfjs as any).getDocument({ url: data.fileUrl }).promise;
-        const pageNum = Math.min(Math.max(data.currentPage ?? 1, 1), pdf.numPages);
-        const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 1.5 });
-        const canvas = document.createElement('canvas');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('Failed to create canvas context');
-        await page.render({ canvasContext: ctx, viewport }).promise;
-        imageSource = canvas;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        showToast(`Failed to render PDF: ${msg}`, 'error');
-        return;
-      }
+      showToast('PDF not ready. Please wait and try again.', 'warning');
+      return;
     }
 
     const existingCoordinates = data.regions

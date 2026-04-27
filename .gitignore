@@ -24,6 +24,3 @@ dist-ssr
 *.sw?
 .vercel
 .env*.local
-
-# BANK
-public/fixtures/bank-statements/*

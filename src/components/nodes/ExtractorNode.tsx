@@ -17,9 +17,6 @@ import { extractTextFromRegion, extractFullPage, extractFullPageFromRegion } fro
 import { detectFields, fieldOverlapsExisting } from '../../core/extraction/fieldDetector';
 import { parseTableFromOcr } from '../../core/extraction/tableParser';
 import { useCanvasStore } from '../../store/canvasStore';
-import { useAiSettings } from '../../hooks/useAiSettings';
-import { detectFieldsWithAI } from '../../services/aiService';
-import { isSimpleDataType } from '../../types/data';
 import { useToast } from '../ui/Toast';
 import { useFileNode } from '../../hooks/useFileNode';
 import { useNodeOutputs } from '../../hooks/useNodeOutputs';
@@ -39,7 +36,6 @@ import type {
   ExtractorColumn,
   TextRange,
   SimpleDataType,
-  FieldType,
   DisplayNodeData,
   CachedExtractorEdges,
   DataSourceReference,
@@ -602,144 +598,43 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     [id, data.regions, data.fileUrl, updateNodeData, showToast]
   );
 
-  const { activeProvider, activeConfig, settings: aiSettings } = useAiSettings();
-
   const handleAutoDetect = useCallback(async () => {
     if (!data.fileUrl) {
       showToast('No document loaded', 'error');
       return;
     }
 
+    // Determine the image source to use for OCR
+    // For images, we can use the file URL directly if the ref isn't available
+    // For PDFs, we need the canvas ref
     let imageSource: HTMLImageElement | HTMLCanvasElement | string;
     if (imageRef.current) {
       imageSource = imageRef.current;
     } else if (data.fileType === 'image') {
+      // Fall back to URL for images
       imageSource = data.fileUrl;
     } else {
       showToast('PDF not ready. Please wait and try again.', 'warning');
       return;
     }
 
-    const existingCoordinates = data.regions
-      .filter((r) => r.coordinates && r.pageNumber === data.currentPage)
-      .map((r) => r.coordinates!);
-
     setIsAutoDetecting(true);
     try {
-      const useAi = !!(activeProvider && activeConfig?.apiKey && activeConfig?.selectedModel);
-
-      if (useAi) {
-        // AI-imbued OCR path: send the page image directly to a vision model.
-        // For PDFs, the rendered canvas is the imageRef. For images with no
-        // ref, we fall back to fetching the URL and converting to base64.
-        let mimeType = 'image/png';
-        let base64: string;
-
-        if (imageSource instanceof HTMLCanvasElement) {
-          const dataUrl = imageSource.toDataURL('image/png');
-          base64 = dataUrl.split(',')[1] ?? '';
-        } else if (imageSource instanceof HTMLImageElement) {
-          const canvas = document.createElement('canvas');
-          canvas.width = imageSource.naturalWidth || imageSource.width;
-          canvas.height = imageSource.naturalHeight || imageSource.height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) throw new Error('Failed to create canvas context');
-          ctx.drawImage(imageSource, 0, 0);
-          base64 = canvas.toDataURL('image/png').split(',')[1] ?? '';
-        } else {
-          // string URL — fetch and encode
-          const res = await fetch(imageSource);
-          const blob = await res.blob();
-          mimeType = blob.type || 'image/png';
-          base64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const result = reader.result as string;
-              resolve(result.split(',')[1] ?? '');
-            };
-            reader.onerror = () => reject(reader.error);
-            reader.readAsDataURL(blob);
-          });
-        }
-
-        // Also gather OCR words so the AI can compute bboxes when its vision
-        // alone doesn't yield reliable coordinates (large/complex pages).
-        const ocr = await extractFullPage(imageSource);
-
-        const aiFields = await detectFieldsWithAI(
-          {
-            images: [{ mimeType, base64 }],
-            ocrWords: ocr.words,
-            ocrText: ocr.text,
-            customInstructions: aiSettings.customInstructions,
-          },
-          activeProvider!.id,
-          activeConfig!.selectedModel,
-          activeConfig!.apiKey,
-        );
-
-        if (aiFields.length === 0) {
-          showToast('AI detected no fields. Try manual selection.', 'warning');
-          return;
-        }
-
-        const newRegions: ExtractedRegion[] = [];
-        for (const f of aiFields) {
-          const dataType: SimpleDataType = isSimpleDataType(f.dataType as SimpleDataType)
-            ? (f.dataType as SimpleDataType)
-            : 'string';
-
-          const bbox = f.bbox;
-          if (bbox && fieldOverlapsExisting(
-            { bbox, label: f.label, text: f.text, confidence: f.confidence * 100, dataType, fieldType: (f.fieldType ?? 'unknown') as FieldType },
-            existingCoordinates,
-            0.8,
-          )) {
-            continue;
-          }
-
-          const regionId = generateId('region');
-          newRegions.push({
-            id: regionId,
-            label: f.label || f.fieldType || 'Field',
-            selectionType: bbox ? 'box' : 'manual',
-            coordinates: bbox,
-            pageNumber: data.currentPage,
-            extractedData: {
-              type: dataType,
-              value: f.text,
-              source: {
-                nodeId: id,
-                regionId,
-                pageNumber: data.currentPage,
-                coordinates: bbox,
-                extractionMethod: 'ocr' as const,
-                confidence: Math.round((f.confidence ?? 0) * 100),
-              },
-            },
-            dataType,
-            color: getColorForType(dataType).border,
-          });
-        }
-
-        if (newRegions.length === 0) {
-          showToast('All AI-detected fields overlap with existing regions.', 'info');
-          return;
-        }
-
-        updateNodeData(id, { regions: [...data.regions, ...newRegions] });
-        showToast(`AI detected ${newRegions.length} field(s)`, 'success');
-        return;
-      }
-
-      // Fallback: local OCR + heuristic detector
+      // 1. Run full-page OCR
       const ocrResult = await extractFullPage(imageSource);
+
+      // 2. Detect fields
       const detectedFields = detectFields(ocrResult);
 
       if (detectedFields.length === 0) {
-        showToast('No fields detected. Try manual selection or configure an AI provider.', 'warning');
+        showToast('No fields detected. Try manual selection.', 'warning');
         return;
       }
+
+      // 3. Filter out fields that overlap with existing regions
+      const existingCoordinates = data.regions
+        .filter((r) => r.coordinates && r.pageNumber === data.currentPage)
+        .map((r) => r.coordinates!);
 
       const newFields = detectedFields.filter(
         (field) => !fieldOverlapsExisting(field, existingCoordinates, 0.8)
@@ -750,6 +645,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
         return;
       }
 
+      // 4. Convert to regions
       const newRegions: ExtractedRegion[] = newFields.map((field) => {
         const regionId = generateId('region');
         return {
@@ -775,7 +671,12 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
         };
       });
 
-      updateNodeData(id, { regions: [...data.regions, ...newRegions] });
+      // 5. Add to existing regions
+      updateNodeData(id, {
+        regions: [...data.regions, ...newRegions],
+      });
+
+      // 6. Show feedback with confidence warning if needed
       const lowConfidenceCount = newFields.filter((f) => f.confidence < 50).length;
       if (lowConfidenceCount > 0) {
         showToast(
@@ -787,12 +688,11 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       }
     } catch (error) {
       console.error('Auto-detection failed:', error);
-      const msg = error instanceof Error ? error.message : 'Unknown error';
-      showToast(`Auto-detection failed: ${msg}`, 'error');
+      showToast('Auto-detection failed. Please try again.', 'error');
     } finally {
       setIsAutoDetecting(false);
     }
-  }, [id, data.fileUrl, data.fileType, data.regions, data.currentPage, updateNodeData, showToast, activeProvider, activeConfig, aiSettings.customInstructions]);
+  }, [id, data.fileUrl, data.fileType, data.regions, data.currentPage, updateNodeData, showToast]);
 
   // Scroll to selected region once when selection changes
   useEffect(() => {

@@ -65,7 +65,7 @@ export function LynkCanvas() {
   const focusedGroupId = useCanvasStore((state) => state.focusedGroupId);
   const setFocusedGroup = useCanvasStore((state) => state.setFocusedGroup);
   const { showToast } = useToast();
-  const { screenToFlowPosition, fitView, getNodes, deleteElements } = useReactFlow();
+  const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
 
   // Keyboard shortcuts (Delete, Ctrl+S, Ctrl+Z, Ctrl+G, etc.)
   useKeyboardShortcuts();
@@ -286,9 +286,9 @@ export function LynkCanvas() {
         }
       }
 
-      setTimeout(() => deleteElements({ edges: [{ id: edge.id }] }), 150);
+      setTimeout(() => removeEdge(edge.id), 150);
     },
-    [deleteElements]
+    [removeEdge]
   );
 
   // Wrap onEdgesChange to clean up viewport regions when edges are deleted

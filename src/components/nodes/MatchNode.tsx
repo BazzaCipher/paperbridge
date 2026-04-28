@@ -2,26 +2,27 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './base/BaseNode';
-import { NodeEntry } from './base/NodeEntry';
+import { TxnGroupHandle } from './base/TxnGroupHandle';
 import { EditableLabel } from './base/EditableLabel';
 import { useCanvasStore } from '../../store/canvasStore';
 import type { MatchNode as MatchNodeType } from '../../types';
 import type { TxnGroup } from '../../core/sources/txnGroup';
 import { reconcile } from '../../core/reconciliation/reconcile';
+import { txnGroupHandle } from '../../core/handles/txnGroup';
 import { ReconciliationStudio } from './match/ReconciliationStudio';
 
 /** Resolve the TxnGroup connected to a target handle by walking edges back to a source. */
 function resolveTxnGroup(
   edges: ReturnType<typeof useCanvasStore.getState>['edges'],
   selfId: string,
-  targetHandle: string,
+  slotName: string,
   getTxnGroup: (id: string) => TxnGroup | undefined,
 ): TxnGroup | null {
+  const targetHandle = txnGroupHandle.make(slotName);
   const edge = edges.find((e) => e.target === selfId && e.targetHandle === targetHandle);
   if (!edge?.sourceHandle) return null;
-  const prefix = 'txngroup:';
-  if (!edge.sourceHandle.startsWith(prefix)) return null;
-  const id = edge.sourceHandle.slice(prefix.length);
+  const id = txnGroupHandle.parse(edge.sourceHandle);
+  if (!id) return null;
   return getTxnGroup(id) ?? null;
 }
 
@@ -104,11 +105,11 @@ export function MatchNode({ id, data, selected }: NodeProps<MatchNodeType>) {
     >
       <div className="relative">
         {/* Top input: source A */}
-        <NodeEntry id="txngroup:source-a" handleType="target" handlePosition={Position.Top}>
+        <TxnGroupHandle name="source-a" handleType="target" handlePosition={Position.Top}>
           <div className="text-xs text-bridge-500 truncate flex-1">
             {groupA ? `A: ${groupA.label} (${groupA.transactions.length})` : <span className="text-bridge-400">Connect TxnGroup A on top</span>}
           </div>
-        </NodeEntry>
+        </TxnGroupHandle>
 
         {/* Body: count chip + Open button */}
         <div className="px-2 py-1.5 flex flex-col gap-1">
@@ -130,22 +131,22 @@ export function MatchNode({ id, data, selected }: NodeProps<MatchNodeType>) {
         </div>
 
         {/* Outputs */}
-        <NodeEntry id="txngroup:matched" handleType="source" handlePosition={Position.Right}>
+        <TxnGroupHandle name="matched" handleType="source" handlePosition={Position.Right}>
           <div className="text-[10px] text-bridge-400 flex-1 text-right pr-2">matched</div>
-        </NodeEntry>
-        <NodeEntry id="txngroup:unmatched-a" handleType="source" handlePosition={Position.Right}>
+        </TxnGroupHandle>
+        <TxnGroupHandle name="unmatched-a" handleType="source" handlePosition={Position.Right}>
           <div className="text-[10px] text-bridge-400 flex-1 text-right pr-2">unmatched A</div>
-        </NodeEntry>
-        <NodeEntry id="txngroup:unmatched-b" handleType="source" handlePosition={Position.Right}>
+        </TxnGroupHandle>
+        <TxnGroupHandle name="unmatched-b" handleType="source" handlePosition={Position.Right}>
           <div className="text-[10px] text-bridge-400 flex-1 text-right pr-2">unmatched B</div>
-        </NodeEntry>
+        </TxnGroupHandle>
 
         {/* Bottom input: source B */}
-        <NodeEntry id="txngroup:source-b" handleType="target" handlePosition={Position.Bottom}>
+        <TxnGroupHandle name="source-b" handleType="target" handlePosition={Position.Bottom}>
           <div className="text-xs text-bridge-500 truncate flex-1">
             {groupB ? `B: ${groupB.label} (${groupB.transactions.length})` : <span className="text-bridge-400">Connect TxnGroup B on bottom</span>}
           </div>
-        </NodeEntry>
+        </TxnGroupHandle>
       </div>
 
       {studioOpen && groupA && groupB && result && (

@@ -3,6 +3,7 @@ import type { LynkNode } from '../../types';
 import { CanExport, CanImport, CalculationNode, ExtractorNode, DisplayNode, ViewportNode } from '../../types';
 import { wouldCreateCycle } from './dependencyGraph';
 import { getOperation, isTypeCompatible } from '../operations/operationRegistry';
+import { txnGroupHandle } from '../handles/txnGroup';
 
 export interface ConnectionValidationContext {
   nodes: LynkNode[];
@@ -55,8 +56,8 @@ export function validateConnection(
   // TxnGroup-typed handles: source handle id starts with "txngroup:" — payload
   // is a TxnGroup reference, not a scalar. Targets must explicitly opt in by
   // exposing a target handle whose id also starts with "txngroup:".
-  const sourceIsTxnGroup = connection.sourceHandle?.startsWith('txngroup:') ?? false;
-  const targetIsTxnGroup = connection.targetHandle?.startsWith('txngroup:') ?? false;
+  const sourceIsTxnGroup = txnGroupHandle.is(connection.sourceHandle);
+  const targetIsTxnGroup = txnGroupHandle.is(connection.targetHandle);
   if (sourceIsTxnGroup !== targetIsTxnGroup) {
     return {
       valid: false,

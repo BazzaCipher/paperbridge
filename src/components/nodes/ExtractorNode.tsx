@@ -6,10 +6,9 @@ import { DocumentViewer } from './file/DocumentViewer';
 import { RegionSelector } from './file/RegionSelector';
 import { HighlightOverlay } from './file/HighlightOverlay';
 import { RegionList } from './file/RegionList';
-import { NodeEntry } from './base/NodeEntry';
+import { TxnGroupHandle } from './base/TxnGroupHandle';
 import { FileNodePreview } from './file/FileNodePreview';
-import { Modal } from '../ui/Modal';
-import { ZoomControls } from '../ui/ZoomControls';
+import { DocumentModal } from './file/DocumentModal';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { FileDropZone } from '../ui/FileDropZone';
 import { extractTextFromRegion, extractFullPage, extractFullPageFromRegion, type FullPageOcrResult } from '../../core/extraction/ocrExtractor';
@@ -21,10 +20,9 @@ import { suggestBankMapping, materializedTableToTxnGroup, regionsToInvoiceTxnGro
 import { useAiSettings } from '../../hooks/useAiSettings';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useToast } from '../ui/Toast';
-import { useFileNode } from '../../hooks/useFileNode';
+import { useFileNodeState } from '../../hooks/useFileNodeState';
 import { useNodeOutputs } from '../../hooks/useNodeOutputs';
 import { useSyncNodeOutputs } from '../../hooks/useSyncNodeOutputs';
-import { useDocumentZoom } from '../../hooks/useDocumentZoom';
 import { getColorForType, getCompatibleTypes } from '../../utils/colors';
 import { generateId } from '../../utils/id';
 import { createRegionFromBox, createRegionFromText, roleFromFieldType } from '../../utils/regions';
@@ -139,21 +137,14 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
   const { showToast } = useToast();
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isAutoDetecting, setIsAutoDetecting] = useState(false);
-  const [, setViewerHeight] = useState(400);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectionMode, setSelectionMode] = useState<'select' | 'box' | 'text' | 'table'>('box');
   const [isExtractingTable, setIsExtractingTable] = useState(false);
   const { activeProvider, activeConfig } = useAiSettings();
-  const [pageOffsets, setPageOffsets] = useState<Map<number, number>>(new Map());
-  const [pdfError, setPdfError] = useState<string | null>(null);
   const imageRef = useRef<HTMLImageElement | HTMLCanvasElement | null>(null);
-  const viewerAreaRef = useRef<HTMLDivElement>(null);
   const documentRef = useRef<HTMLDivElement>(null);
   const lastScrolledRef = useRef<string | null>(null);
-  const { zoom, zoomIn, zoomOut, resetZoom } = useDocumentZoom(viewerAreaRef, isModalOpen);
 
   // ── Populate Exportable.outputs from regions ──────────────────────────────
   const outputs = useMemo(() => {
@@ -256,35 +247,37 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     [id, updateNodeData]
   );
 
-  const { handleFileSelect, handleFileDrop, handleDragOver, handlePickFromRegistry } = useFileNode(id, handleFileInit);
-
-  const handlePdfLoad = useCallback(
-    ({ numPages }: { numPages: number }) => {
-      updateNodeData(id, { totalPages: numPages });
-      setPdfError(null);
-    },
-    [id, updateNodeData]
-  );
-
-  const handlePdfError = useCallback((error: Error) => {
-    console.error('PDF load error:', error);
-    setPdfError('Failed to load PDF');
-  }, []);
+  const {
+    viewerAreaRef,
+    isModalOpen,
+    openModal: baseOpenModal,
+    closeModal: baseCloseModal,
+    isPickerOpen,
+    openPicker,
+    closePicker,
+    zoom,
+    zoomIn,
+    zoomOut,
+    resetZoom,
+    pdfError,
+    handlePdfLoad,
+    handlePdfError,
+    pageOffsets,
+    setPageOffsets,
+    handleFileSelect,
+    handleFileDrop,
+    handleDragOver,
+    handlePickFromRegistry,
+  } = useFileNodeState(id, handleFileInit);
 
   const handleDocumentLoad = useCallback(
     (numPages: number) => {
       updateNodeData(id, { totalPages: numPages });
-      setViewerHeight(VIEWER_WIDTH * 1.4);
     },
     [id, updateNodeData]
   );
 
-  const handleContentResize = useCallback(
-    (_width: number, height: number) => {
-      setViewerHeight(height);
-    },
-    []
-  );
+  const handleContentResize = useCallback(() => {}, []);
 
   const handlePageChange = useCallback(
     (page: number) => {
@@ -554,7 +547,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     const region = data.regions.find((r) => r.id === regionId);
     if (region) {
       updateNodeData(id, { currentPage: region.pageNumber });
-      setIsModalOpen(true);
+      baseOpenModal();
     }
   }, [data.regions, id, updateNodeData, selectedRegionId]);
 
@@ -821,14 +814,13 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
 
   const openModal = useCallback(() => {
     if (data.fileType !== 'pdf') setSelectionMode('box');
-    setIsModalOpen(true);
-  }, [data.fileType]);
+    baseOpenModal();
+  }, [data.fileType, baseOpenModal]);
 
   const closeModal = useCallback(() => {
-    setIsModalOpen(false);
+    baseCloseModal();
     setIsFullscreen(false);
-    resetZoom();
-  }, [resetZoom]);
+  }, [baseCloseModal]);
 
   // Convert to DisplayNode
   const convertToDisplay = useCallback(() => {
@@ -912,7 +904,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                 onDrop={handleFileDrop}
                 onDragOver={handleDragOver}
                 compact
-                onPickFromRegistry={() => setIsPickerOpen(true)}
+                onPickFromRegistry={openPicker}
               />
             </div>
           )}
@@ -920,30 +912,28 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
 
         {/* Invoice TxnGroup handle - emitted when any region has role: 'amount' */}
         {data.invoiceTxnGroupId && (
-          <NodeEntry
+          <TxnGroupHandle
             key={`txngroup-invoice-${data.invoiceTxnGroupId}`}
-            id={`txngroup:${data.invoiceTxnGroupId}`}
+            name={data.invoiceTxnGroupId}
             handleType="source"
             handlePosition={Position.Right}
-            handleColor="#10b981"
           >
             <div className="flex items-center gap-2 flex-1 min-w-0 py-0.5">
               <div className="w-2 h-2 rounded-full flex-shrink-0 bg-emerald-500" />
               <span className="text-xs text-bridge-500 truncate">Invoice</span>
             </div>
-          </NodeEntry>
+          </TxnGroupHandle>
         )}
 
         {/* TxnGroup handles - one per detected bank statement table */}
         {(data.tables ?? [])
           .filter((t) => t.txnGroupId)
           .map((t) => (
-            <NodeEntry
+            <TxnGroupHandle
               key={`txngroup-${t.id}`}
-              id={`txngroup:${t.txnGroupId}`}
+              name={t.txnGroupId!}
               handleType="source"
               handlePosition={Position.Right}
-              handleColor="#10b981"
             >
               <div className="flex items-center gap-2 flex-1 min-w-0 py-0.5">
                 <div className="w-2 h-2 rounded-full flex-shrink-0 bg-emerald-500" />
@@ -954,7 +944,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                   p{t.pageNumber}
                 </span>
               </div>
-            </NodeEntry>
+            </TxnGroupHandle>
           ))}
 
         {/* Compact region list with values - no OCR button here */}
@@ -972,23 +962,19 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       </BaseNode>
 
       {/* Document viewer modal with side panel */}
-      <Modal
+      <DocumentModal
         isOpen={isModalOpen}
         onClose={closeModal}
         title={data.fileName || 'Document Viewer'}
-        className="w-[950px] max-w-[95vw]"
+        viewerAreaRef={viewerAreaRef}
+        zoom={zoom}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onResetZoom={resetZoom}
         fullscreen={isFullscreen}
         onToggleFullscreen={() => setIsFullscreen((f) => !f)}
-      >
-        <div className={`flex ${isFullscreen ? 'h-[calc(100vh-49px)]' : 'h-[75vh]'}`}>
-          {/* Document viewer area */}
-          <div
-            className="flex-1 overflow-auto bg-paper-50"
-            ref={viewerAreaRef}
-            onDoubleClick={(e) => e.stopPropagation()}
-          >
-            {/* Selection mode toggle */}
-            <div className="sticky top-0 z-10 flex items-center gap-2 py-2 px-4 bg-white border-b border-paper-200 shadow-sm">
+        toolbar={
+          <>
               <button
                 onClick={() => setSelectionMode('select')}
                 className={`px-3 py-1.5 text-xs rounded-md transition-colors flex items-center gap-1.5 ${
@@ -1078,77 +1064,10 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                   </>
                 )}
               </button>
-
-              {/* Spacer */}
-              <div className="flex-1" />
-
-              {/* Zoom controls */}
-              <ZoomControls zoom={zoom} onZoomIn={zoomIn} onZoomOut={zoomOut} onReset={resetZoom} />
-            </div>
-
-            {/* Document with overlays - CSS transform zoom (GPU, no re-render) */}
-            <div className="relative p-6 flex justify-center" ref={viewerAreaRef}>
-              <div
-                ref={documentRef}
-                className="relative bg-white shadow-lg"
-                style={{
-                  transform: `scale(${zoom})`,
-                  transformOrigin: 'top center',
-                }}
-              >
-                <DocumentViewer
-                  fileUrl={data.fileUrl ?? null}
-                  fileType={data.fileType}
-                  currentPage={data.currentPage}
-                  totalPages={data.totalPages}
-                  onPageChange={handlePageChange}
-                  onDocumentLoad={handleDocumentLoad}
-                  onImageRef={(ref) => {
-                    imageRef.current = ref;
-                  }}
-                  onTextSelect={selectionMode === 'text' ? handleTextSelect : undefined}
-                  onContentResize={handleContentResize}
-                  onPageOffsetsChange={setPageOffsets}
-                  enableTextSelection={selectionMode === 'text'}
-                  width={VIEWER_WIDTH}
-                  devicePixelRatio={Math.max(window.devicePixelRatio, zoom) * window.devicePixelRatio}
-                  scrollMode={true}
-                >
-                  {/* Overlays share coordinate space at base width */}
-                  {data.fileUrl && (
-                    <HighlightOverlay
-                      regions={data.regions}
-                      currentPage={data.currentPage}
-                      selectedRegionId={selectedRegionId}
-                      onRegionSelect={handleRegionSelect}
-                      interactive={selectionMode === 'select' || selectionMode === 'box' || selectionMode === 'table'}
-                      nodeId={id}
-                      scrollMode={true}
-                      pageOffsets={pageOffsets}
-                      onRowEdgeDrag={handleRowEdgeDrag}
-                    />
-                  )}
-                </DocumentViewer>
-              </div>
-              {/* RegionSelector fills entire viewer area — allows drawing outside the page */}
-              {data.fileUrl && (selectionMode === 'box' || selectionMode === 'table') && (
-                <RegionSelector
-                  onRegionCreate={handleBoxOrTableCreate}
-                  documentRef={documentRef}
-                  pageOffsets={pageOffsets}
-                  zoom={zoom}
-                />
-              )}
-            </div>
-          </div>
-
-          {/* Collapsible fields panel - with OCR and value editing */}
-          <CollapsiblePanel
-            title="Fields"
-            badge={data.regions.length}
-            defaultOpen={true}
-            side="right"
-          >
+          </>
+        }
+        panel={
+          <CollapsiblePanel title="Fields" badge={data.regions.length} defaultOpen={true} side="right">
             <RegionList
               regions={data.regions}
               selectedRegionId={selectedRegionId}
@@ -1163,28 +1082,77 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
               showOcrButton={false}
             />
           </CollapsiblePanel>
+        }
+        footer={
+          <div className="px-4 py-2 bg-paper-100 border-t border-paper-200 text-xs text-bridge-500 flex items-center justify-between">
+            <span>
+              {selectionMode === 'select'
+                ? 'Click on a highlight to select it.'
+                : selectionMode === 'box'
+                ? 'Draw a box to create a field.'
+                : selectionMode === 'table'
+                ? 'Draw a box around a table to extract its rows.'
+                : 'Select text directly to create a field with that value.'}
+            </span>
+            <span className="text-bridge-400">
+              {data.regions.length} field{data.regions.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        }
+      >
+        <div className="relative p-6 flex justify-center">
+          <div
+            ref={documentRef}
+            className="relative bg-white shadow-lg"
+            style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
+          >
+            <DocumentViewer
+              fileUrl={data.fileUrl ?? null}
+              fileType={data.fileType}
+              currentPage={data.currentPage}
+              totalPages={data.totalPages}
+              onPageChange={handlePageChange}
+              onDocumentLoad={handleDocumentLoad}
+              onImageRef={(ref) => {
+                imageRef.current = ref;
+              }}
+              onTextSelect={selectionMode === 'text' ? handleTextSelect : undefined}
+              onContentResize={handleContentResize}
+              onPageOffsetsChange={setPageOffsets}
+              enableTextSelection={selectionMode === 'text'}
+              width={VIEWER_WIDTH}
+              devicePixelRatio={Math.max(window.devicePixelRatio, zoom) * window.devicePixelRatio}
+              scrollMode={true}
+            >
+              {data.fileUrl && (
+                <HighlightOverlay
+                  regions={data.regions}
+                  currentPage={data.currentPage}
+                  selectedRegionId={selectedRegionId}
+                  onRegionSelect={handleRegionSelect}
+                  interactive={selectionMode === 'select' || selectionMode === 'box' || selectionMode === 'table'}
+                  nodeId={id}
+                  scrollMode={true}
+                  pageOffsets={pageOffsets}
+                  onRowEdgeDrag={handleRowEdgeDrag}
+                />
+              )}
+            </DocumentViewer>
+          </div>
+          {data.fileUrl && (selectionMode === 'box' || selectionMode === 'table') && (
+            <RegionSelector
+              onRegionCreate={handleBoxOrTableCreate}
+              documentRef={documentRef}
+              pageOffsets={pageOffsets}
+              zoom={zoom}
+            />
+          )}
         </div>
-
-        {/* Footer instructions */}
-        <div className="px-4 py-2 bg-paper-100 border-t border-paper-200 text-xs text-bridge-500 flex items-center justify-between">
-          <span>
-            {selectionMode === 'select'
-              ? 'Click on a highlight to select it.'
-              : selectionMode === 'box'
-              ? 'Draw a box to create a field.'
-              : selectionMode === 'table'
-              ? 'Draw a box around a table to extract its rows.'
-              : 'Select text directly to create a field with that value.'}
-          </span>
-          <span className="text-bridge-400">
-            {data.regions.length} field{data.regions.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-      </Modal>
+      </DocumentModal>
 
       <FilePickerModal
         isOpen={isPickerOpen}
-        onClose={() => setIsPickerOpen(false)}
+        onClose={closePicker}
         onSelect={handlePickFromRegistry}
       />
     </>

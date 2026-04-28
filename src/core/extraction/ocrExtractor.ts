@@ -202,6 +202,26 @@ export async function extractFullPageFromRegion(
     canvas.width,
     canvas.height,
   );
+  // Debug: open the cropped region in a new tab so you can see what OCR sees.
+  if (typeof window !== 'undefined') {
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      console.log('[table-crop]', {
+        region,
+        scaled: src,
+        natural: {
+          w: img instanceof HTMLImageElement ? img.naturalWidth : img.width,
+          h: img instanceof HTMLImageElement ? img.naturalHeight : img.height,
+        },
+        css: { w: (img as HTMLElement).clientWidth, h: (img as HTMLElement).clientHeight },
+        canvas: { w: canvas.width, h: canvas.height },
+        dataUrl,
+      });
+      window.open(dataUrl, '_blank');
+    } catch (e) {
+      console.warn('[table-crop] could not preview:', e);
+    }
+  }
   return extractFullPage(canvas);
 }
 

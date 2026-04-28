@@ -68,7 +68,7 @@ export function DocumentModal({
           ref={viewerAreaRef}
           onDoubleClick={(e) => e.stopPropagation()}
         >
-          <div className="sticky top-0 z-10 flex items-center gap-2 py-2 px-4 bg-white border-b border-paper-200 shadow-sm">
+          <div className="sticky top-0 z-20 flex items-center gap-2 py-2 px-4 bg-white border-b border-paper-200 shadow-sm">
             {toolbar}
             <div className="flex-1" />
             <ZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onReset={onResetZoom} />

@@ -40,6 +40,31 @@ interface ExtractionResult {
   dataValue: DataValue;
 }
 
+/**
+ * Map a region from CSS-pixel display space to the source image's natural-pixel
+ * space. RegionSelector emits coords against the rendered document width
+ * (e.g. 500 CSS px), but a PDF canvas's internal pixel buffer is dpr-scaled and
+ * an <img>'s natural dims can dwarf its rendered width. Cropping with raw CSS
+ * coords lands on a tiny upper-left slice and OCR sees nothing.
+ */
+function scaleRegionToNatural(
+  img: HTMLImageElement | HTMLCanvasElement,
+  region: RegionCoordinates,
+): RegionCoordinates {
+  const naturalW = img instanceof HTMLImageElement ? img.naturalWidth : img.width;
+  const naturalH = img instanceof HTMLImageElement ? img.naturalHeight : img.height;
+  const cssW = (img as HTMLElement).clientWidth || naturalW;
+  const cssH = (img as HTMLElement).clientHeight || naturalH;
+  const sx = naturalW / cssW;
+  const sy = naturalH / cssH;
+  return {
+    x: region.x * sx,
+    y: region.y * sy,
+    width: region.width * sx,
+    height: region.height * sy,
+  };
+}
+
 function parseExtractedText(text: string): DataValue {
   const trimmed = text.trim();
 
@@ -104,21 +129,20 @@ export async function extractTextFromRegion(
     img = imageSource;
   }
 
-  // Set canvas size to region size
-  canvas.width = region.width;
-  canvas.height = region.height;
+  const src = scaleRegionToNatural(img, region);
+  canvas.width = Math.max(1, Math.round(src.width));
+  canvas.height = Math.max(1, Math.round(src.height));
 
-  // Draw cropped region to canvas
   ctx.drawImage(
     img,
-    region.x,
-    region.y,
-    region.width,
-    region.height,
+    src.x,
+    src.y,
+    src.width,
+    src.height,
     0,
     0,
-    region.width,
-    region.height
+    canvas.width,
+    canvas.height,
   );
 
   // Run OCR on the cropped region
@@ -164,18 +188,19 @@ export async function extractFullPageFromRegion(
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Failed to get canvas context');
-  canvas.width = region.width;
-  canvas.height = region.height;
+  const src = scaleRegionToNatural(img, region);
+  canvas.width = Math.max(1, Math.round(src.width));
+  canvas.height = Math.max(1, Math.round(src.height));
   ctx.drawImage(
     img,
-    region.x,
-    region.y,
-    region.width,
-    region.height,
+    src.x,
+    src.y,
+    src.width,
+    src.height,
     0,
     0,
-    region.width,
-    region.height,
+    canvas.width,
+    canvas.height,
   );
   return extractFullPage(canvas);
 }

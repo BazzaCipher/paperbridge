@@ -343,7 +343,8 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
         if (!selection) {
           const built = buildTableSelectionFromOcr(ocr);
           if (!built) {
-            showToast('Could not detect a table in the selected region.', 'warning');
+            showToast('Could not detect a table — kept selection as a box.', 'warning');
+            handleRegionCreate(coordinates, page);
             return;
           }
           selection = built.selection;
@@ -368,7 +369,9 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
         );
 
         if (newRegions.length === 0) {
-          showToast('No populated rows detected.', 'warning');
+          showToast('No populated rows detected — kept selection as a box.', 'warning');
+          tableOcrCache.delete(tableId);
+          handleRegionCreate(coordinates, page);
           return;
         }
 
@@ -406,7 +409,8 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       } catch (err) {
         console.error('Table extraction failed:', err);
         const msg = err instanceof Error ? err.message : 'Unknown error';
-        showToast(`Table extraction failed: ${msg}`, 'error');
+        showToast(`Table extraction failed: ${msg} — kept selection as a box.`, 'error');
+        handleRegionCreate(coordinates, page);
       } finally {
         setIsExtractingTable(false);
       }
@@ -425,6 +429,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       data.fileId,
       data.label,
       addTxnGroup,
+      handleRegionCreate,
     ],
   );
 

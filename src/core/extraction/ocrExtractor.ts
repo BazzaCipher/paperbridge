@@ -202,22 +202,36 @@ export async function extractFullPageFromRegion(
     canvas.width,
     canvas.height,
   );
-  // Debug: open the cropped region in a new tab so you can see what OCR sees.
+  // Debug: open the source AND the cropped region in new tabs.
   if (typeof window !== 'undefined') {
     try {
-      const dataUrl = canvas.toDataURL('image/png');
+      const naturalW = img instanceof HTMLImageElement ? img.naturalWidth : img.width;
+      const naturalH = img instanceof HTMLImageElement ? img.naturalHeight : img.height;
+      const cssW = (img as HTMLElement).clientWidth;
+      const cssH = (img as HTMLElement).clientHeight;
+
+      // Source dump
+      const srcCanvas = document.createElement('canvas');
+      srcCanvas.width = naturalW;
+      srcCanvas.height = naturalH;
+      const srcCtx = srcCanvas.getContext('2d');
+      if (srcCtx) srcCtx.drawImage(img, 0, 0);
+      const srcUrl = srcCanvas.toDataURL('image/png');
+      const cropUrl = canvas.toDataURL('image/png');
+
       console.log('[table-crop]', {
         region,
         scaled: src,
-        natural: {
-          w: img instanceof HTMLImageElement ? img.naturalWidth : img.width,
-          h: img instanceof HTMLImageElement ? img.naturalHeight : img.height,
-        },
-        css: { w: (img as HTMLElement).clientWidth, h: (img as HTMLElement).clientHeight },
-        canvas: { w: canvas.width, h: canvas.height },
-        dataUrl,
+        natural: { w: naturalW, h: naturalH },
+        css: { w: cssW, h: cssH },
+        canvasOut: { w: canvas.width, h: canvas.height },
+        srcKind: img.constructor.name,
+        srcInDom: (img as HTMLElement).isConnected,
+        cropDataLen: cropUrl.length,
+        srcDataLen: srcUrl.length,
       });
-      window.open(dataUrl, '_blank');
+      window.open(srcUrl, '_blank');
+      window.open(cropUrl, '_blank');
     } catch (e) {
       console.warn('[table-crop] could not preview:', e);
     }

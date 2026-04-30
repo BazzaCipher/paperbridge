@@ -53,11 +53,17 @@ function midpoints(values: number[]): number[] {
   return seps;
 }
 
-function looksLikeHeader(cells: string[]): boolean {
+// Bank-statement header keywords. Mirrors scoreHeader() in core/sources/txnGroup.ts.
+const HEADER_KEYWORD_RE =
+  /\b(date|posted|trans|desc|narr|details|ref|particulars|payee|amount|amt|debit|withdraw|credit|deposit|balance)\b/i;
+
+function headerScore(cells: string[]): number {
   const nonEmpty = cells.filter((c) => c.length > 0);
-  if (nonEmpty.length === 0) return false;
+  if (nonEmpty.length === 0) return 0;
   const numeric = nonEmpty.filter((c) => /^[$€£]?[\d,.\s-]+%?$/.test(c.trim())).length;
-  return numeric / nonEmpty.length < 0.4;
+  if (numeric / nonEmpty.length >= 0.4) return 0;
+  const keywordHits = nonEmpty.filter((c) => HEADER_KEYWORD_RE.test(c)).length;
+  return 1 + keywordHits;
 }
 
 export interface ParseTableOptions {
@@ -99,19 +105,33 @@ export function buildTableSelectionFromOcr(
     return null;
   }
 
-  const lineCenters = candidateLines
-    .map((l) => (l.bbox.y0 + l.bbox.y1) / 2)
-    .sort((a, b) => a - b);
+  // Sort lines top-to-bottom so date detection and "lines before first date"
+  // walk in reading order regardless of OCR result ordering.
+  const sortedLines = [...candidateLines].sort(
+    (a, b) => (a.bbox.y0 + a.bbox.y1) / 2 - (b.bbox.y0 + b.bbox.y1) / 2,
+  );
+  const lineCenters = sortedLines.map((l) => (l.bbox.y0 + l.bbox.y1) / 2);
 
-  // Group lines into rows: a new row starts on every line whose text contains
-  // a date. Continuation lines (no date) merge into the previous row's range.
-  // Bank statements often wrap a long description over 2-3 lines; without this
-  // each wrap was emitted as its own row.
-  const dateBearing = candidateLines
-    .filter((l) => DATE_RE.test(l.words.map((w) => w.text).join(' ')))
-    .map((l) => (l.bbox.y0 + l.bbox.y1) / 2)
-    .sort((a, b) => a - b);
-  const rowAnchors = dateBearing.length >= 2 ? dateBearing : lineCenters;
+  // Group lines into rows: every line BEFORE the first date gets its own row
+  // (these are typically header / sub-header lines), then each date-bearing
+  // line starts a new row. Continuation lines without a date merge into the
+  // previous row. This keeps multi-line transaction descriptions in one row
+  // without folding the header into row 0 — folding would defeat header
+  // detection and downstream bank-mapping confidence would drop to zero.
+  const lineHasDate = sortedLines.map((l) =>
+    DATE_RE.test(l.words.map((w) => w.text).join(' ')),
+  );
+  const dateCount = lineHasDate.filter(Boolean).length;
+  const firstDateIdx = lineHasDate.indexOf(true);
+
+  let rowAnchors: number[];
+  if (dateCount >= 2 && firstDateIdx !== -1) {
+    rowAnchors = sortedLines
+      .filter((_, i) => i <= firstDateIdx || lineHasDate[i])
+      .map((l) => (l.bbox.y0 + l.bbox.y1) / 2);
+  } else {
+    rowAnchors = lineCenters;
+  }
 
   const W = ocr.imageWidth || 1;
   const H = ocr.imageHeight || 1;
@@ -145,15 +165,37 @@ export function buildTableSelectionFromOcr(
   };
 
   const provisionalTable = materializeTable(provisional, ocr);
-  const detected = looksLikeHeader(provisionalTable.rows[0] ?? []);
+
+  // Pick the best header among the first few rows: scan up to the row before
+  // the first detected date-row (or first 3 rows max). Prefer keyword hits
+  // (date/desc/amount/balance...) so a page-title row above the column header
+  // doesn't get mistaken for the header.
+  const maxHeaderScan = Math.min(
+    provisionalTable.rows.length,
+    Math.max(1, dateCount >= 2 ? sortedLines.slice(0, firstDateIdx + 1).length : 1),
+    3,
+  );
+  let bestHeaderIdx = -1;
+  let bestHeaderScore = 0;
+  for (let i = 0; i < maxHeaderScan; i++) {
+    const score = headerScore(provisionalTable.rows[i] ?? []);
+    if (score > bestHeaderScore) {
+      bestHeaderScore = score;
+      bestHeaderIdx = i;
+    }
+  }
+  const detected = bestHeaderIdx !== -1;
   const selection: TableSelection = detected
-    ? { ...provisional, headerRowIndex: 0 }
+    ? { ...provisional, headerRowIndex: bestHeaderIdx }
     : provisional;
 
   log('built', {
     cols: provisional.colXs.length + 1,
     rows: provisional.rowYs.length + 1,
     headerDetected: detected,
+    headerRowIndex: bestHeaderIdx,
+    dateCount,
+    rowAnchorCount: rowAnchors.length,
   });
 
   return { selection, lines: candidateLines, headerDetected: detected };

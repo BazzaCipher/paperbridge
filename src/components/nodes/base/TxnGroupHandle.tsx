@@ -22,6 +22,8 @@ export function TxnGroupHandle({ name, handleType, handlePosition, children }: T
       handleType={handleType}
       handlePosition={handlePosition}
       handleColor={TXNGROUP_HANDLE_COLOR}
+      handleShape="square"
+      className="bg-emerald-50/60 border-l-2 border-emerald-400"
     >
       {children}
     </NodeEntry>

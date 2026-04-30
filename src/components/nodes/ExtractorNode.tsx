@@ -944,9 +944,11 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
             handleType="source"
             handlePosition={Position.Right}
           >
-            <div className="flex items-center gap-2 flex-1 min-w-0 py-0.5">
-              <div className="w-2 h-2 rounded-full flex-shrink-0 bg-emerald-500" />
-              <span className="text-xs text-bridge-500 truncate">Invoice</span>
+            <div className="flex items-center gap-2 flex-1 min-w-0 py-1">
+              <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500 text-white flex-shrink-0">
+                Txn
+              </span>
+              <span className="text-xs font-medium text-emerald-800 truncate">Invoice</span>
             </div>
           </TxnGroupHandle>
         )}
@@ -961,9 +963,11 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
               handleType="source"
               handlePosition={Position.Right}
             >
-              <div className="flex items-center gap-2 flex-1 min-w-0 py-0.5">
-                <div className="w-2 h-2 rounded-full flex-shrink-0 bg-emerald-500" />
-                <span className="text-xs text-bridge-500 truncate">
+              <div className="flex items-center gap-2 flex-1 min-w-0 py-1">
+                <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500 text-white flex-shrink-0">
+                  Txn
+                </span>
+                <span className="text-xs font-medium text-emerald-800 truncate">
                   Bank statement
                 </span>
                 <span className="text-[10px] text-bridge-400">

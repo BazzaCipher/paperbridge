@@ -9,6 +9,9 @@ import {
   materializeTable,
   type TableSelection,
 } from './tableMaterializer';
+import { debug } from '../../utils/debug'; // see src/utils/debug.ts
+
+const log = debug('table');
 
 export interface ParsedTable {
   headers: string[];
@@ -18,6 +21,16 @@ export interface ParsedTable {
 }
 
 const DEFAULT_COLUMN_TOLERANCE_PX = 20;
+
+// Matches common bank-statement date formats: 12/03, 12/03/2025, 12-03-25,
+// 12 Mar, 12 Mar 2025, Mar 12, Mar 12 2025.
+const MONTHS = '(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)';
+const DATE_RE = new RegExp(
+  `(?:\\b\\d{1,2}[\\/\\-.]\\d{1,2}(?:[\\/\\-.]\\d{2,4})?\\b)` +
+    `|(?:\\b\\d{1,2}\\s+${MONTHS}\\b)` +
+    `|(?:\\b${MONTHS}\\s+\\d{1,2}\\b)`,
+  'i',
+);
 
 function clusterX(positions: number[], tolerance: number): number[] {
   if (positions.length === 0) return [];
@@ -71,18 +84,34 @@ export function buildTableSelectionFromOcr(
     return yc >= yRange.min && yc <= yRange.max;
   });
 
-  if (candidateLines.length === 0) return null;
+  if (candidateLines.length === 0) {
+    log('null', { reason: 'no candidate lines', totalLines: ocr.lines.length, yRange });
+    return null;
+  }
 
   const allStarts: number[] = [];
   for (const line of candidateLines) {
     for (const w of line.words) allStarts.push(w.bbox.x0);
   }
   const xAnchors = clusterX(allStarts, tolerance);
-  if (xAnchors.length === 0) return null;
+  if (xAnchors.length === 0) {
+    log('null', { reason: 'no x anchors', candidateLines: candidateLines.length });
+    return null;
+  }
 
   const lineCenters = candidateLines
     .map((l) => (l.bbox.y0 + l.bbox.y1) / 2)
     .sort((a, b) => a - b);
+
+  // Group lines into rows: a new row starts on every line whose text contains
+  // a date. Continuation lines (no date) merge into the previous row's range.
+  // Bank statements often wrap a long description over 2-3 lines; without this
+  // each wrap was emitted as its own row.
+  const dateBearing = candidateLines
+    .filter((l) => DATE_RE.test(l.words.map((w) => w.text).join(' ')))
+    .map((l) => (l.bbox.y0 + l.bbox.y1) / 2)
+    .sort((a, b) => a - b);
+  const rowAnchors = dateBearing.length >= 2 ? dateBearing : lineCenters;
 
   const W = ocr.imageWidth || 1;
   const H = ocr.imageHeight || 1;
@@ -112,7 +141,7 @@ export function buildTableSelectionFromOcr(
   const provisional: TableSelection = {
     bbox: { x0: xMin / W, y0: yMin / H, x1: xMax / W, y1: yMax / H },
     colXs: midpoints(xAnchors).map((x) => x / W),
-    rowYs: midpoints(lineCenters).map((y) => y / H),
+    rowYs: midpoints(rowAnchors).map((y) => y / H),
   };
 
   const provisionalTable = materializeTable(provisional, ocr);
@@ -120,6 +149,12 @@ export function buildTableSelectionFromOcr(
   const selection: TableSelection = detected
     ? { ...provisional, headerRowIndex: 0 }
     : provisional;
+
+  log('built', {
+    cols: provisional.colXs.length + 1,
+    rows: provisional.rowYs.length + 1,
+    headerDetected: detected,
+  });
 
   return { selection, lines: candidateLines, headerDetected: detected };
 }

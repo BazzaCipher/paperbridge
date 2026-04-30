@@ -158,35 +158,41 @@ export function RegionList({
 
     return (
       <div className="divide-y divide-paper-100">
-        {txnRegions.length > 0 && (
-          <div className="border-l-2 border-emerald-400">
-            <div className="px-3 py-1 bg-emerald-50/60 flex items-center gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-                Transaction
-              </span>
-              <span className="text-[10px] text-bridge-400">
-                feeds txngroup handle
-              </span>
-            </div>
+        <div className="border-l-2 border-emerald-400">
+          <div className="px-3 py-1 bg-emerald-50/60 flex items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+              Transaction
+            </span>
+            <span className="text-[10px] text-bridge-400">
+              feeds txngroup handle
+            </span>
+          </div>
+          {txnRegions.length > 0 ? (
             <div className="divide-y divide-paper-100">
               {txnRegions.map((r) => renderRow(r, { roleLed: true }))}
             </div>
+          ) : (
+            <div className="px-3 py-2 text-[11px] text-bridge-400 italic">
+              Tag a field as amount / date / desc to populate
+            </div>
+          )}
+        </div>
+        <div>
+          <div className="px-3 py-1 bg-paper-50">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-bridge-500">
+              Fields
+            </span>
           </div>
-        )}
-        {fieldRegions.length > 0 && (
-          <div>
-            {txnRegions.length > 0 && (
-              <div className="px-3 py-1 bg-paper-50">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-bridge-500">
-                  Fields
-                </span>
-              </div>
-            )}
+          {fieldRegions.length > 0 ? (
             <div className="divide-y divide-paper-100">
               {fieldRegions.map((r) => renderRow(r))}
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="px-3 py-2 text-[11px] text-bridge-400 italic">
+              No untagged fields
+            </div>
+          )}
+        </div>
       </div>
     );
   }

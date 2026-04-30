@@ -103,7 +103,13 @@ export function materializeTable(
     rowCells.map((words) =>
       words
         .slice()
-        .sort((a, b) => a.bbox.x0 - b.bbox.x0)
+        .sort((a, b) => {
+          const ay = (a.bbox.y0 + a.bbox.y1) / 2;
+          const by = (b.bbox.y0 + b.bbox.y1) / 2;
+          const lineGap = Math.max(a.bbox.y1 - a.bbox.y0, b.bbox.y1 - b.bbox.y0) * 0.6;
+          if (Math.abs(ay - by) > lineGap) return ay - by;
+          return a.bbox.x0 - b.bbox.x0;
+        })
         .map((w) => w.text)
         .join(' ')
         .trim(),

@@ -16,7 +16,7 @@ import { detectFields, fieldOverlapsExisting } from '../../core/extraction/field
 import { buildTableSelectionFromOcr } from '../../core/extraction/tableParser';
 import { materializeTable, type TableSelection, type MaterializedTable } from '../../core/extraction/tableMaterializer';
 import { detectTableWithAI } from '../../services/aiService';
-import { suggestBankMapping, materializedTableToTxnGroup, regionsToInvoiceTxnGroup } from '../../core/sources/txnGroup';
+import { suggestBankMapping, inferMappingFromContent, materializedTableToTxnGroup, regionsToInvoiceTxnGroup } from '../../core/sources/txnGroup';
 import { useAiSettings } from '../../hooks/useAiSettings';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useToast } from '../ui/Toast';
@@ -389,17 +389,32 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           return;
         }
 
+        // Try header-keyword mapping first; fall back to content-based
+        // inference so table mode emits a TxnGroup even when OCR mangles
+        // headers or the statement has no header row at all.
         let txnGroupId: string | undefined;
-        const suggested = suggestBankMapping(table);
+        const headerSuggest = suggestBankMapping(table);
+        const useHeader = headerSuggest.mapping && headerSuggest.confidence >= 0.7;
+        const contentSuggest = useHeader ? null : inferMappingFromContent(table);
+        const finalMapping = useHeader ? headerSuggest.mapping : contentSuggest?.mapping ?? null;
+        const finalSource: 'header' | 'content' | 'none' = useHeader
+          ? 'header'
+          : finalMapping
+            ? 'content'
+            : 'none';
         log('table-mapping', {
           nodeId: id,
           headers: table.headers,
           rows: table.rows.length,
-          mapping: suggested.mapping,
-          confidence: suggested.confidence,
+          headerMapping: headerSuggest.mapping,
+          headerConfidence: headerSuggest.confidence,
+          contentMapping: contentSuggest?.mapping,
+          contentConfidence: contentSuggest?.confidence,
+          finalMapping,
+          finalSource,
         });
-        if (suggested.mapping && suggested.confidence >= 0.7) {
-          const group = materializedTableToTxnGroup(table, suggested.mapping, {
+        if (finalMapping) {
+          const group = materializedTableToTxnGroup(table, finalMapping, {
             nodeId: id,
             label: data.label || 'Bank statement',
             fileId: data.fileId ?? '',

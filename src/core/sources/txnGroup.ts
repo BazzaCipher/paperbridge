@@ -395,3 +395,75 @@ export function suggestBankMapping(table: MaterializedTable): SuggestedMapping {
 
   return { mapping, confidence: Math.min(1, confidence) };
 }
+
+/**
+ * Content-based mapping: picks columns by what their cells LOOK like, not by
+ * header text. Used when suggestBankMapping (header-keyword based) fails —
+ * common when OCR mangles header words ("Dale" instead of "Date") or when the
+ * statement has no header row at all. As long as the table has a date-shaped
+ * column and a money-shaped column, table-mode emits a usable TxnGroup.
+ */
+export function inferMappingFromContent(table: MaterializedTable): SuggestedMapping {
+  const { headers, rows } = table;
+  if (headers.length === 0 || rows.length === 0) return { mapping: null, confidence: 0 };
+
+  const stats = headers.map((_, colIdx) => {
+    const cells = rows.map((r) => (r[colIdx] ?? '').trim()).filter(Boolean);
+    const total = cells.length || 1;
+    const dates = cells.filter((c) => DATE_RE.test(c)).length / total;
+    const money = cells.filter((c) => MONEY_RE.test(c.replace(/\s/g, ''))).length / total;
+    const avgLen = cells.reduce((a, c) => a + c.length, 0) / total;
+    const wordCount = cells.reduce((a, c) => a + c.split(/\s+/).length, 0) / total;
+    return { colIdx, dates, money, avgLen, wordCount };
+  });
+
+  const used = new Set<number>();
+  const pickBy = (key: 'dates' | 'money', minRatio: number, prefer?: 'highest' | 'lowest'): number => {
+    const candidates = stats.filter((s) => !used.has(s.colIdx) && s[key] >= minRatio);
+    if (candidates.length === 0) return -1;
+    candidates.sort((a, b) => b[key] - a[key]);
+    let pick = candidates[0];
+    if (prefer === 'lowest') {
+      // Among similarly-money columns, balance is usually the rightmost / largest avg.
+      // For amount we want the one that's NOT balance: tie-break by lower colIdx.
+      candidates.sort((a, b) => a.colIdx - b.colIdx);
+      pick = candidates[0];
+    }
+    used.add(pick.colIdx);
+    return pick.colIdx;
+  };
+
+  const dateIdx = pickBy('dates', 0.5);
+  if (dateIdx === -1) return { mapping: null, confidence: 0 };
+
+  const amountIdx = pickBy('money', 0.5, 'lowest');
+  if (amountIdx === -1) return { mapping: null, confidence: 0 };
+
+  // Balance: a second money column to the right of amount.
+  const balanceIdx = stats
+    .filter((s) => !used.has(s.colIdx) && s.money >= 0.5 && s.colIdx > amountIdx)
+    .sort((a, b) => b.money - a.money)[0]?.colIdx;
+  if (balanceIdx !== undefined) used.add(balanceIdx);
+
+  // Description: longest unused text column (most words / highest avg length).
+  const descCandidates = stats
+    .filter((s) => !used.has(s.colIdx) && s.dates < 0.3 && s.money < 0.3)
+    .sort((a, b) => b.wordCount - a.wordCount || b.avgLen - a.avgLen);
+  const descIdx = descCandidates[0]?.colIdx ?? -1;
+  if (descIdx === -1) return { mapping: null, confidence: 0 };
+
+  const mapping: BankColumnMapping = {
+    date: headers[dateIdx],
+    description: headers[descIdx],
+    amount: headers[amountIdx],
+    balance: balanceIdx !== undefined ? headers[balanceIdx] : undefined,
+  };
+
+  // Confidence reflects content quality, capped well below the keyword-based
+  // path so a header match still wins when both succeed.
+  const confidence = Math.min(
+    0.7,
+    (stats[dateIdx].dates + stats[amountIdx].money) / 2,
+  );
+  return { mapping, confidence };
+}

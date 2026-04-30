@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react';
 import type { ExtractedRegion } from '../../../types';
+import type { TableRecord } from '../../../types/regions';
 import { getColorForType } from '../../../utils/colors';
 import { useCanvasStore } from '../../../store/canvasStore';
 import { Highlightable } from '../../../types/categories';
@@ -72,6 +73,8 @@ interface HighlightOverlayProps {
   pageOffsets?: Map<number, number>; // Y offset for each page in scrollMode
   /** When set, rows linked to a TableRecord get draggable top/bottom edges. */
   onRowEdgeDrag?: (regionId: string, edge: 'top' | 'bottom', deltaY: number) => void;
+  /** Table records — drawn as a single outline per group instead of per-row boxes. */
+  tables?: TableRecord[];
 }
 
 export function HighlightOverlay({
@@ -84,6 +87,7 @@ export function HighlightOverlay({
   scrollMode = false,
   pageOffsets,
   onRowEdgeDrag,
+  tables = [],
 }: HighlightOverlayProps) {
   // Check if a region is externally highlighted
   const highlightedHandle = useCanvasStore(state => state.highlightedHandle);
@@ -95,13 +99,15 @@ export function HighlightOverlay({
     [highlightedHandle, nodeId]
   );
 
-  // Filter regions - in scrollMode show all pages, otherwise just current page
+  // Filter regions - in scrollMode show all pages, otherwise just current page.
+  // Skip regions owned by a TxnGroup table; they appear in the listed group instead.
+  const visible = regions.filter((r) => !r.tableSourceId);
   const boxRegions = scrollMode
-    ? regions.filter((r) => r.selectionType === 'box' && r.coordinates)
-    : regions.filter((r) => r.pageNumber === currentPage && r.selectionType === 'box' && r.coordinates);
+    ? visible.filter((r) => r.selectionType === 'box' && r.coordinates)
+    : visible.filter((r) => r.pageNumber === currentPage && r.selectionType === 'box' && r.coordinates);
   const textRegions = scrollMode
-    ? regions.filter((r) => r.selectionType === 'text' && r.textRange?.rects)
-    : regions.filter((r) => r.pageNumber === currentPage && r.selectionType === 'text' && r.textRange?.rects);
+    ? visible.filter((r) => r.selectionType === 'text' && r.textRange?.rects)
+    : visible.filter((r) => r.pageNumber === currentPage && r.selectionType === 'text' && r.textRange?.rects);
 
   // Helper to get Y offset for a page in scrollMode
   const getPageOffset = (pageNumber: number): number => {
@@ -109,10 +115,39 @@ export function HighlightOverlay({
     return pageOffsets.get(pageNumber) ?? 0;
   };
 
-  if (boxRegions.length === 0 && textRegions.length === 0) return null;
+  const visibleTables = scrollMode
+    ? tables
+    : tables.filter((t) => t.pageNumber === currentPage);
+
+  if (boxRegions.length === 0 && textRegions.length === 0 && visibleTables.length === 0) return null;
 
   return (
     <div className="absolute inset-0 pointer-events-none">
+      {/* Render TxnGroup table outlines */}
+      {visibleTables.map((table) => (
+        <div
+          key={table.id}
+          data-table-id={table.id}
+          className="absolute"
+          style={{
+            left: table.pageBbox.x,
+            top: getPageOffset(table.pageNumber) + table.pageBbox.y,
+            width: table.pageBbox.width,
+            height: table.pageBbox.height,
+            border: '2px solid rgb(16 185 129)',
+            backgroundColor: 'rgb(16 185 129 / 0.06)',
+            borderRadius: 2,
+          }}
+        >
+          <div
+            className="absolute -top-5 left-0 px-1.5 py-0.5 text-[10px] text-white rounded-t whitespace-nowrap font-semibold uppercase tracking-wide"
+            style={{ backgroundColor: 'rgb(16 185 129)' }}
+          >
+            TxnGroup
+          </div>
+        </div>
+      ))}
+
       {/* Render box selections */}
       {boxRegions.map((region) => {
         const colors = getColorForType(region.dataType);

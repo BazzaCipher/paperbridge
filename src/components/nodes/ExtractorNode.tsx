@@ -1180,18 +1180,24 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                   scrollMode={true}
                   pageOffsets={pageOffsets}
                   onRowEdgeDrag={handleRowEdgeDrag}
+                  tables={data.tables}
                 />
               )}
             </DocumentViewer>
+            {/* Selection overlay lives INSIDE the scaled document so it
+                covers the full visible bounds at any zoom. Outside, CSS
+                transforms don't affect layout, so an inset-0 sibling would
+                only catch clicks on the un-zoomed footprint and overflowed
+                drags would fall through to the modal's scroll container. */}
+            {data.fileUrl && (selectionMode === 'box' || selectionMode === 'table') && (
+              <RegionSelector
+                onRegionCreate={handleBoxOrTableCreate}
+                documentRef={documentRef}
+                pageOffsets={pageOffsets}
+                zoom={zoom}
+              />
+            )}
           </div>
-          {data.fileUrl && (selectionMode === 'box' || selectionMode === 'table') && (
-            <RegionSelector
-              onRegionCreate={handleBoxOrTableCreate}
-              documentRef={documentRef}
-              pageOffsets={pageOffsets}
-              zoom={zoom}
-            />
-          )}
         </div>
       </DocumentModal>
 

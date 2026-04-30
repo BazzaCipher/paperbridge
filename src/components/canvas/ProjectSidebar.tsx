@@ -1,5 +1,8 @@
+import { X, Plus, FolderOpen, Copy, Trash2 } from 'lucide-react';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useToast } from '../ui/Toast';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export interface SessionProject {
   id: string;
@@ -44,128 +47,125 @@ export function ProjectSidebar({
 
   return (
     <div
-      className="h-full shrink-0 overflow-hidden transition-[max-width] duration-300 ease-in-out"
+      className="h-full shrink-0 overflow-hidden transition-[max-width] duration-300 ease-[var(--ease-out-expo)]"
       style={{
         maxWidth: open ? '16rem' : '0',
         pointerEvents: open ? 'auto' : 'none',
       }}
     >
-      <div className="w-64 h-full bg-white border-r border-paper-200 flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-paper-100">
-        <h2 className="text-sm font-semibold text-bridge-700">Projects</h2>
-        <button
-          onClick={onClose}
-          className="p-1 text-bridge-400 hover:text-bridge-600 rounded hover:bg-paper-100 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
+      <div className="w-64 h-full bg-white border-r border-paper-100 flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between pl-4 pr-2 py-2.5 border-b border-paper-100">
+          <h2 className="text-sm font-semibold text-bridge-800">Projects</h2>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
+                <X />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Close</TooltipContent>
+          </Tooltip>
+        </div>
 
-      {/* Create / Open buttons */}
-      <div className="px-3 pt-3 pb-1 flex gap-2">
-        <button
-          onClick={onCreateProject}
-          className="flex items-center justify-center gap-1.5 flex-1 px-3 py-2 text-sm font-medium text-copper-500 bg-copper-400/10 hover:bg-copper-400/20 rounded-lg transition-colors cursor-pointer"
-          title="New empty canvas"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          New
-        </button>
-        <button
-          onClick={() => onLoad()}
-          className="flex items-center justify-center gap-1.5 flex-1 px-3 py-2 text-sm font-medium text-copper-500 bg-copper-400/10 hover:bg-copper-400/20 rounded-lg transition-colors cursor-pointer"
-          title="Open canvas from file"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-            <polyline points="7 10 12 5 17 10" />
-            <line x1="12" y1="5" x2="12" y2="19" />
-          </svg>
-          Open
-        </button>
-      </div>
+        {/* Create / Open buttons */}
+        <div className="px-3 pt-3 pb-1 flex gap-2">
+          <Button variant="outline" size="sm" onClick={onCreateProject} className="flex-1">
+            <Plus />
+            New
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => onLoad()} className="flex-1">
+            <FolderOpen />
+            Open
+          </Button>
+        </div>
 
-      {/* Project list */}
-      <div className="flex-1 overflow-y-auto py-2">
-        {projects.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-bridge-400">
-            No projects open
-          </div>
-        )}
-        {projects.map((project) => {
-          const isActive = project.id === activeProjectId;
-          return (
-            <div
-              key={project.id}
-              className={`mx-2 mb-1 rounded-lg transition-colors ${
-                isActive
-                  ? 'bg-copper-400/10 border border-copper-400'
-                  : 'hover:bg-copper-400/10 border border-transparent'
-              }`}
-            >
-              <button
-                className="w-full text-left px-3 py-2.5 cursor-pointer"
-                onClick={() => !isActive && onSwitchProject(project.id)}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-sm font-medium truncate ${isActive ? 'text-copper-600' : 'text-bridge-700'}`}>
-                    {isActive ? canvasName : project.name}
-                  </span>
-                  {isActive && (
-                    <span className="text-[10px] font-medium text-copper-500 bg-copper-400/20 px-1.5 py-0.5 rounded">
-                      active
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 mt-1 text-xs text-bridge-400">
-                  <span>{project.nodeCount} nodes</span>
-                  <span>{formatTime(project.lastModified)}</span>
-                </div>
-              </button>
-
-              {/* Actions */}
-              <div className="flex items-center gap-1 px-3 pb-2">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCloneProject(project.id);
-                    showToast('Project cloned', 'success');
-                  }}
-                  className="p-1 text-bridge-400 hover:text-bridge-600 rounded hover:bg-paper-100 transition-colors"
-                  title="Clone project"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <rect x="9" y="9" width="13" height="13" rx="2" />
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (projects.length <= 1 && isActive) {
-                      showToast('Cannot delete the only project', 'warning');
-                      return;
-                    }
-                    onDeleteProject(project.id);
-                    showToast('Project removed', 'info');
-                  }}
-                  className="p-1 text-bridge-400 hover:text-red-500 rounded hover:bg-red-50 transition-colors"
-                  title="Remove project"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 2h4M2.5 4h11M5.5 4v8.5a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1V4M6.5 7v4M9.5 7v4" />
-                  </svg>
-                </button>
-              </div>
+        {/* Project list */}
+        <div className="flex-1 overflow-y-auto py-2">
+          {projects.length === 0 && (
+            <div className="px-4 py-8 text-center text-sm text-bridge-400">
+              No projects open
             </div>
-          );
-        })}
-      </div>
+          )}
+          {projects.map((project) => {
+            const isActive = project.id === activeProjectId;
+            return (
+              <div
+                key={project.id}
+                className={`mx-2 mb-1 rounded-lg transition-colors ${
+                  isActive
+                    ? 'bg-copper-400/10 border border-copper-400/60 shadow-[0_0_0_1px_rgba(52,211,153,0.1)]'
+                    : 'hover:bg-paper-50 border border-transparent'
+                }`}
+              >
+                <button
+                  className="w-full text-left px-3 py-2.5 cursor-pointer"
+                  onClick={() => !isActive && onSwitchProject(project.id)}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`text-sm font-medium truncate ${
+                        isActive ? 'text-copper-600' : 'text-bridge-800'
+                      }`}
+                    >
+                      {isActive ? canvasName : project.name}
+                    </span>
+                    {isActive && (
+                      <span className="shrink-0 text-[10px] font-medium text-copper-600 bg-copper-400/15 px-1.5 py-0.5 rounded">
+                        active
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-1 text-xs text-bridge-400">
+                    <span>{project.nodeCount} nodes</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{formatTime(project.lastModified)}</span>
+                  </div>
+                </button>
+
+                {/* Actions */}
+                <div className="flex items-center gap-0.5 px-2 pb-1.5">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCloneProject(project.id);
+                          showToast('Project cloned', 'success');
+                        }}
+                      >
+                        <Copy />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Clone</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="hover:!text-red-500 hover:!bg-red-50"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (projects.length <= 1 && isActive) {
+                            showToast('Cannot delete the only project', 'warning');
+                            return;
+                          }
+                          onDeleteProject(project.id);
+                          showToast('Project removed', 'info');
+                        }}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Remove</TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

@@ -1,9 +1,12 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useReactFlow } from '@xyflow/react';
+import { X, List, FolderTree, Search, ArrowUp, ArrowDown } from 'lucide-react';
 import { useCanvasStore } from '../../store/canvasStore';
 import { BlobRegistry, type FileMetadata, type VirtualFolder } from '../../store/canvasPersistence';
 import { getFileTypeColor } from '../../utils/colors';
 import { formatFileSize } from '../../utils/formatting';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -769,7 +772,7 @@ export function FileRegistryPanel() {
 
   return (
     <div
-      className="h-full shrink-0 overflow-hidden transition-[max-width] duration-300 ease-in-out"
+      className="h-full shrink-0 overflow-hidden transition-[max-width] duration-300 ease-[var(--ease-out-expo)]"
       style={{
         maxWidth: fileRegistryOpen ? '18rem' : '0',
         pointerEvents: fileRegistryOpen ? 'auto' : 'none',
@@ -780,85 +783,97 @@ export function FileRegistryPanel() {
       onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
       onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
-      <div className="w-72 h-full bg-white border-l border-paper-200 flex flex-col">
+      <div className="w-72 h-full bg-white border-l border-paper-100 flex flex-col">
       {/* Header */}
-      <div className="p-3 border-b border-paper-200 flex items-center justify-between">
+      <div className="pl-3 pr-2 py-2.5 border-b border-paper-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-bridge-900">Files</h3>
-          <span className="px-1.5 py-0.5 text-[10px] font-medium bg-paper-100 text-bridge-600 rounded-full">
+          <h3 className="text-sm font-semibold text-bridge-800">Files</h3>
+          <span className="px-1.5 py-0.5 text-[10px] font-medium bg-paper-100 text-bridge-500 rounded-full tabular-nums">
             {files.length}
           </span>
         </div>
         <div className="flex items-center gap-1">
           {/* View mode toggle */}
-          <div className="flex bg-paper-100 rounded p-0.5">
-            <button
-              onClick={() => setFileRegistryViewMode('flat')}
-              className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
-                fileRegistryViewMode === 'flat'
-                  ? 'bg-white shadow-sm text-bridge-700 font-medium'
-                  : 'text-bridge-500 hover:text-bridge-700'
-              }`}
-              title="Flat list view"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-              </svg>
-            </button>
-            <button
-              onClick={() => setFileRegistryViewMode('hierarchy')}
-              className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
-                fileRegistryViewMode === 'hierarchy'
-                  ? 'bg-white shadow-sm text-bridge-700 font-medium'
-                  : 'text-bridge-500 hover:text-bridge-700'
-              }`}
-              title="Folder hierarchy view"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-              </svg>
-            </button>
+          <div className="flex bg-paper-100 rounded-md p-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setFileRegistryViewMode('flat')}
+                  className={`flex items-center justify-center h-6 w-6 rounded transition-colors ${
+                    fileRegistryViewMode === 'flat'
+                      ? 'bg-white shadow-sm text-bridge-700'
+                      : 'text-bridge-500 hover:text-bridge-700'
+                  }`}
+                >
+                  <List className="h-3 w-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Flat list</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setFileRegistryViewMode('hierarchy')}
+                  className={`flex items-center justify-center h-6 w-6 rounded transition-colors ${
+                    fileRegistryViewMode === 'hierarchy'
+                      ? 'bg-white shadow-sm text-bridge-700'
+                      : 'text-bridge-500 hover:text-bridge-700'
+                  }`}
+                >
+                  <FolderTree className="h-3 w-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Folder hierarchy</TooltipContent>
+            </Tooltip>
           </div>
-          <button
-            onClick={toggleFileRegistry}
-            className="p-1 hover:bg-paper-100 rounded transition-colors text-bridge-500"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={toggleFileRegistry} aria-label="Close">
+                <X />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Close</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
       {/* Search */}
       <div className="p-2 border-b border-paper-100">
-        <input
-          type="text"
-          value={fileRegistrySearch}
-          onChange={(e) => setFileRegistrySearch(e.target.value)}
-          placeholder="Search files..."
-          className="w-full px-2 py-1 text-xs border border-paper-200 rounded focus:outline-none focus:ring-1 focus:ring-copper-400"
-        />
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-bridge-400 pointer-events-none" />
+          <input
+            type="text"
+            value={fileRegistrySearch}
+            onChange={(e) => setFileRegistrySearch(e.target.value)}
+            placeholder="Search files..."
+            className="w-full pl-7 pr-2 py-1.5 text-xs bg-paper-50 border border-paper-100 rounded-md placeholder:text-bridge-400 focus:outline-none focus:bg-white focus:border-copper-400 focus:ring-1 focus:ring-copper-400/30 transition-colors"
+          />
+        </div>
       </div>
 
       {/* Sort controls */}
-      <div className="px-2 py-1.5 border-b border-paper-100 flex gap-1">
-        {(['name', 'type', 'size', 'date'] as const).map((field) => (
-          <button
-            key={field}
-            onClick={() => handleSortClick(field)}
-            className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
-              fileRegistrySort.field === field
-                ? 'bg-copper-400/20 text-copper-600 font-medium'
-                : 'text-bridge-500 hover:bg-paper-100'
-            }`}
-          >
-            {field.charAt(0).toUpperCase() + field.slice(1)}
-            {fileRegistrySort.field === field && (
-              <span className="ml-0.5">{fileRegistrySort.direction === 'asc' ? '\u2191' : '\u2193'}</span>
-            )}
-          </button>
-        ))}
+      <div className="px-2 py-1.5 border-b border-paper-100 flex gap-0.5">
+        {(['name', 'type', 'size', 'date'] as const).map((field) => {
+          const active = fileRegistrySort.field === field;
+          return (
+            <button
+              key={field}
+              onClick={() => handleSortClick(field)}
+              className={`flex items-center gap-0.5 px-1.5 py-1 text-[10px] rounded-md transition-colors ${
+                active
+                  ? 'bg-copper-400/15 text-copper-600 font-medium'
+                  : 'text-bridge-500 hover:bg-paper-100'
+              }`}
+            >
+              {field.charAt(0).toUpperCase() + field.slice(1)}
+              {active && (
+                fileRegistrySort.direction === 'asc'
+                  ? <ArrowUp className="h-2.5 w-2.5" />
+                  : <ArrowDown className="h-2.5 w-2.5" />
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Duplicate alert */}

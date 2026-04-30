@@ -32,7 +32,11 @@ const DATE_RE = new RegExp(
   'i',
 );
 
-function clusterX(positions: number[], tolerance: number): number[] {
+function clusterX(
+  positions: number[],
+  tolerance: number,
+  minSupport = 1,
+): number[] {
   if (positions.length === 0) return [];
   const sorted = [...positions].sort((a, b) => a - b);
   const clusters: number[][] = [[sorted[0]]];
@@ -42,7 +46,9 @@ function clusterX(positions: number[], tolerance: number): number[] {
     if (sorted[i] - lastVal <= tolerance) last.push(sorted[i]);
     else clusters.push([sorted[i]]);
   }
-  return clusters.map((c) => c.reduce((s, v) => s + v, 0) / c.length);
+  return clusters
+    .filter((c) => c.length >= minSupport)
+    .map((c) => c.reduce((s, v) => s + v, 0) / c.length);
 }
 
 function midpoints(values: number[]): number[] {
@@ -95,16 +101,6 @@ export function buildTableSelectionFromOcr(
     return null;
   }
 
-  const allStarts: number[] = [];
-  for (const line of candidateLines) {
-    for (const w of line.words) allStarts.push(w.bbox.x0);
-  }
-  const xAnchors = clusterX(allStarts, tolerance);
-  if (xAnchors.length === 0) {
-    log('null', { reason: 'no x anchors', candidateLines: candidateLines.length });
-    return null;
-  }
-
   // Sort lines top-to-bottom so date detection and "lines before first date"
   // walk in reading order regardless of OCR result ordering.
   const sortedLines = [...candidateLines].sort(
@@ -124,11 +120,34 @@ export function buildTableSelectionFromOcr(
   const dateCount = lineHasDate.filter(Boolean).length;
   const firstDateIdx = lineHasDate.indexOf(true);
 
+  // Only header lines (pre-first-date) and date-bearing lines define columns.
+  // Continuation lines are typically indented under the description, and
+  // including their word starts creates phantom column boundaries that bisect
+  // the description ("NOODLE | & SUSHI COMBO ..."). They still flow into cells
+  // via the materializer; they just don't pollute column clustering.
+  const anchorLines =
+    dateCount >= 2 && firstDateIdx !== -1
+      ? sortedLines.filter((_, i) => i <= firstDateIdx || lineHasDate[i])
+      : sortedLines;
+
+  const allStarts: number[] = [];
+  for (const line of anchorLines) {
+    for (const w of line.words) allStarts.push(w.bbox.x0);
+  }
+  // Drop anchors that come from <30% of anchor lines: those are
+  // mid-description word starts (e.g. "CAULFIELD", "VIC") that vary per
+  // transaction and would otherwise bisect the description column. A real
+  // column boundary has a word starting near it in most rows.
+  const minSupport = Math.max(2, Math.ceil(anchorLines.length * 0.3));
+  const xAnchors = clusterX(allStarts, tolerance, minSupport);
+  if (xAnchors.length === 0) {
+    log('null', { reason: 'no x anchors', candidateLines: candidateLines.length, minSupport });
+    return null;
+  }
+
   let rowAnchors: number[];
   if (dateCount >= 2 && firstDateIdx !== -1) {
-    rowAnchors = sortedLines
-      .filter((_, i) => i <= firstDateIdx || lineHasDate[i])
-      .map((l) => (l.bbox.y0 + l.bbox.y1) / 2);
+    rowAnchors = anchorLines.map((l) => (l.bbox.y0 + l.bbox.y1) / 2);
   } else {
     rowAnchors = lineCenters;
   }

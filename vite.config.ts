@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -9,6 +10,11 @@ import remarkMdxFrontmatter from 'remark-mdx-frontmatter'
 export default defineConfig({
   server: {
 	host: true
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
   },
   plugins: [
     mdx({

@@ -1,7 +1,36 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
 
 @theme {
+  /* ── shadcn tokens (mapped to existing palette) ─────────────── */
+  --color-background: #ffffff;
+  --color-foreground: #243b53;          /* bridge-800 */
+  --color-card: #ffffff;
+  --color-card-foreground: #243b53;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #243b53;
+  --color-primary: #059669;             /* copper-500 */
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f8fafc;           /* paper-50 */
+  --color-secondary-foreground: #243b53;
+  --color-muted: #f8fafc;
+  --color-muted-foreground: #627d98;    /* bridge-500 */
+  --color-accent: #e2e8f0;              /* paper-100 */
+  --color-accent-foreground: #243b53;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e2e8f0;              /* paper-100 */
+  --color-input: #e2e8f0;
+  --color-ring: #34d399;                /* copper-400 */
+  --radius: 0.5rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
   /* ── Finance-grade palette ─────────────────────────────────── */
   --color-navy-50: #f0f4f8;
   --color-navy-100: #d9e2ec;
@@ -36,6 +65,12 @@
   --color-copper-500: #059669;
   --color-copper-600: #047857;
   --color-copper-700: #065f46;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
 }
 
 :root {
@@ -73,6 +108,16 @@ html, body, #root {
 .react-flow__node-group.selected,
 .react-flow__node-group.selectable.selected {
   box-shadow: none !important;
+}
+
+/* Soft radial vignette behind the canvas dots so nodes pop. */
+.react-flow {
+  background:
+    radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.6) 0%, rgba(248, 250, 252, 0) 55%),
+    linear-gradient(180deg, #fafbfc 0%, #f1f5f9 100%);
+}
+.react-flow__background {
+  opacity: 0.5;
 }
 
 /* ─── Smooth scroll ───────────────────────────────────────── */

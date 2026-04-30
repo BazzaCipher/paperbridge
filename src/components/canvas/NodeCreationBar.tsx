@@ -2,6 +2,8 @@ import { useReactFlow } from '@xyflow/react';
 import { useCanvasStore } from '../../store/canvasStore';
 import { getCreatableTypes } from '../../core/nodes/nodeRegistry';
 import { NodeIcon } from '../ui/NodeIcon';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { LynkNodeData, LynkNodeType } from '../../types';
 
 export function NodeCreationBar() {
@@ -21,20 +23,30 @@ export function NodeCreationBar() {
   return (
     <div
       className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10
-                 flex items-center gap-1.5 bg-white rounded-lg shadow-md p-2
-                 max-w-[calc(100vw-4rem)] overflow-x-auto"
+                 flex items-center gap-1 bg-white/85 backdrop-blur-md
+                 border border-paper-100 rounded-xl shadow-[0_2px_12px_rgba(16,42,67,0.06)]
+                 px-1.5 py-1 max-w-[calc(100vw-4rem)] overflow-x-auto
+                 animate-in fade-in slide-in-from-bottom-2 duration-300"
       style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
     >
       {getCreatableTypes().map((def) => (
-        <button
-          key={def.type}
-          onClick={() => handleAddNode(def.type as LynkNodeType, def.defaultData as LynkNodeData)}
-          className="flex items-center gap-1.5 px-3 py-2 text-sm bg-paper-100 hover:bg-paper-200 rounded transition-colors whitespace-nowrap shrink-0 touch-manipulation"
-          title={`Add ${def.label} Node${def.description ? ` - ${def.description}` : ''}`}
-        >
-          <NodeIcon type={def.icon} />
-          {def.shortLabel || def.label}
-        </button>
+        <Tooltip key={def.type}>
+          <TooltipTrigger asChild>
+            <Button
+              variant="chip"
+              size="sm"
+              onClick={() => handleAddNode(def.type as LynkNodeType, def.defaultData as LynkNodeData)}
+              className="touch-manipulation shrink-0"
+            >
+              <NodeIcon type={def.icon} />
+              <span>{def.shortLabel || def.label}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Add {def.label}
+            {def.description ? ` - ${def.description}` : ''}
+          </TooltipContent>
+        </Tooltip>
       ))}
     </div>
   );

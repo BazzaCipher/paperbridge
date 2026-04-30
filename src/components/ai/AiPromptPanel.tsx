@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { pdfjs } from 'react-pdf';
+import { Sparkles, Settings, Wand2, Link2, Send, Loader2 } from 'lucide-react';
 import { useAiSettings } from '../../hooks/useAiSettings';
 import { AiSettingsModal } from './AiSettingsModal';
 import { askAI, detectFieldsWithAI, autoConnectWithAI } from '../../services/aiService';
@@ -8,6 +9,8 @@ import { useCanvasStore } from '../../store/canvasStore';
 import { BlobRegistry } from '../../store/canvasPersistence';
 import { extractFullPage } from '../../core/extraction/ocrExtractor';
 import { AI_IMAGE_SIZE_LIMIT } from '../../config/ai';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AiMessage, AiDetectedField, AiNodeContext, AiConnectionSuggestion } from '../../types/ai';
 import type { ExtractorNodeData, CalculationNodeData, LabelNodeData, SheetNodeData } from '../../types/nodes';
 
@@ -374,47 +377,52 @@ const handleKeyDown = (e: React.KeyboardEvent) => {
     : (context === 'canvas' ? { width: 320, maxHeight: 400 } : { width: '100%', maxHeight: 300 });
   const outerClass = docked
     ? 'flex flex-col bg-white overflow-hidden'
-    : 'flex flex-col bg-white border border-paper-200 rounded-lg shadow-lg overflow-hidden';
+    : 'flex flex-col bg-white/95 backdrop-blur-md border border-paper-100 rounded-xl shadow-[0_8px_24px_rgba(16,42,67,0.08)] overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300';
+
+  const loadingLabel = activeToolCall
+    ? ({
+        get_file_content: 'Reading document...',
+        get_canvas_graph: 'Scanning canvas...',
+        get_node_details: 'Inspecting node...',
+        get_file_list: 'Listing files...',
+        suggest_connection: 'Creating connection...',
+        create_region: 'Defining field...',
+      } as Record<string, string>)[activeToolCall] ?? `Running ${activeToolCall}...`
+    : 'Thinking...';
 
   return (
     <>
       <div className={outerClass} style={outerStyle}>
         {/* Header */}
-        <div className="flex items-center justify-between px-3 py-2 border-b border-paper-200 bg-paper-50">
-          <span className="text-xs font-medium text-bridge-900 flex items-center gap-1.5">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 text-copper-500" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M5 2a1 1 0 011 1v1h1a1 1 0 010 2H6v1a1 1 0 01-2 0V6H3a1 1 0 010-2h1V3a1 1 0 011-1zm0 10a1 1 0 011 1v1h1a1 1 0 110 2H6v1a1 1 0 11-2 0v-1H3a1 1 0 110-2h1v-1a1 1 0 011-1zM12 2a1 1 0 01.967.744L14.146 7.2 17.5 9.134a1 1 0 010 1.732l-3.354 1.935-1.18 4.455a1 1 0 01-1.933 0L9.854 12.8 6.5 10.866a1 1 0 010-1.732l3.354-1.935 1.18-4.455A1 1 0 0112 2z" />
-            </svg>
+        <div className="flex items-center justify-between pl-3 pr-1.5 py-1.5 border-b border-paper-100 bg-paper-50/60">
+          <span className="text-xs font-medium text-bridge-800 flex items-center gap-1.5">
+            <Sparkles className="h-3.5 w-3.5 text-copper-500" />
             AI Assistant
           </span>
           <div className="flex items-center gap-1">
             {activeProvider && (
-              <span className="text-[10px] text-bridge-400 px-1.5 py-0.5 bg-paper-100 rounded">
+              <span className="text-[10px] text-bridge-500 px-1.5 py-0.5 bg-paper-100 rounded-full">
                 {activeProvider.name}{modelDisplayName ? ` · ${modelDisplayName}` : ''}
               </span>
             )}
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="p-1 text-bridge-400 hover:text-copper-500 transition-colors"
-              title="AI Settings"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-              </svg>
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" onClick={() => setSettingsOpen(true)} aria-label="AI settings">
+                  <Settings />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>AI settings</TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
         {!hasProvider ? (
           /* No provider configured */
           <div className="p-4 text-center">
-            <p className="text-xs text-bridge-400 mb-2">No AI provider configured</p>
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="px-3 py-1.5 text-xs rounded-md bg-copper-500 text-white hover:bg-copper-600 transition-colors"
-            >
+            <p className="text-xs text-bridge-500 mb-2">No AI provider configured</p>
+            <Button size="sm" onClick={() => setSettingsOpen(true)}>
               Configure AI
-            </button>
+            </Button>
           </div>
         ) : (
           <>
@@ -441,18 +449,8 @@ const handleKeyDown = (e: React.KeyboardEvent) => {
                 ))}
                 {isLoading && (
                   <div className="text-xs text-bridge-400 px-2.5 py-1.5 flex items-center gap-1.5">
-                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    {activeToolCall ? ({
-                      get_file_content: 'Reading document...',
-                      get_canvas_graph: 'Scanning canvas...',
-                      get_node_details: 'Inspecting node...',
-                      get_file_list: 'Listing files...',
-                      suggest_connection: 'Creating connection...',
-                      create_region: 'Defining field...',
-                    } as Record<string, string>)[activeToolCall] ?? `Running ${activeToolCall}...` : 'Thinking...'}
+                    <Loader2 className="animate-spin h-3 w-3" />
+                    {loadingLabel}
                   </div>
                 )}
                 <div ref={messagesEndRef} />
@@ -467,59 +465,32 @@ const handleKeyDown = (e: React.KeyboardEvent) => {
             )}
 
             {/* Actions & Input */}
-            <div className="border-t border-paper-200 p-2 space-y-2">
-              {/* Detect fields button */}
-              <button
-                onClick={handleDetectFields}
-                disabled={isDetecting || (!ocrText && context === 'extractor')}
-                className="w-full px-3 py-1.5 text-xs rounded-md bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
-              >
-                {isDetecting ? (
-                  <>
-                    <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Detecting...
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M5 2a1 1 0 011 1v1h1a1 1 0 010 2H6v1a1 1 0 01-2 0V6H3a1 1 0 010-2h1V3a1 1 0 011-1zm0 10a1 1 0 011 1v1h1a1 1 0 110 2H6v1a1 1 0 11-2 0v-1H3a1 1 0 110-2h1v-1a1 1 0 011-1zM12 2a1 1 0 01.967.744L14.146 7.2 17.5 9.134a1 1 0 010 1.732l-3.354 1.935-1.18 4.455a1 1 0 01-1.933 0L9.854 12.8 6.5 10.866a1 1 0 010-1.732l3.354-1.935 1.18-4.455A1 1 0 0112 2z" />
-                    </svg>
-                    Detect Fields
-                  </>
-                )}
-              </button>
+            <div className="border-t border-paper-100 p-2 space-y-1.5">
+              <div className="flex gap-1.5">
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleDetectFields}
+                  disabled={isDetecting || (!ocrText && context === 'extractor')}
+                  className="flex-1"
+                >
+                  {isDetecting ? <Loader2 className="animate-spin" /> : <Wand2 />}
+                  {isDetecting ? 'Detecting...' : 'Detect fields'}
+                </Button>
 
-              {/* Canvas-only: Auto-connect */}
-              {context === 'canvas' && (
-                <div className="flex gap-1.5">
-                  <button
+                {context === 'canvas' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleAutoConnect}
                     disabled={isConnecting}
-                    className="flex-1 px-3 py-1.5 text-xs rounded-md bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
+                    className="flex-1"
                   >
-                    {isConnecting ? (
-                      <>
-                        <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        Connecting...
-                      </>
-                    ) : (
-                      <>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                          <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
-                          <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
-                        </svg>
-                        Auto-connect
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
+                    {isConnecting ? <Loader2 className="animate-spin" /> : <Link2 />}
+                    {isConnecting ? 'Connecting...' : 'Auto-connect'}
+                  </Button>
+                )}
+              </div>
 
               {/* Text input */}
               <div className="flex gap-1.5">
@@ -530,17 +501,17 @@ const handleKeyDown = (e: React.KeyboardEvent) => {
                   onKeyDown={handleKeyDown}
                   placeholder="Ask about your documents..."
                   disabled={isLoading}
-                  className="flex-1 px-2.5 py-1.5 text-xs border border-paper-200 rounded-md bg-white text-bridge-900 placeholder:text-bridge-400 focus:outline-none focus:ring-1 focus:ring-copper-400 disabled:opacity-50"
+                  className="flex-1 px-2.5 py-1.5 text-xs bg-paper-50 border border-paper-100 rounded-md text-bridge-800 placeholder:text-bridge-400 focus:outline-none focus:bg-white focus:border-copper-400 focus:ring-1 focus:ring-copper-400/30 disabled:opacity-50 transition-colors"
                 />
-                <button
+                <Button
+                  variant="default"
+                  size="icon"
                   onClick={handleSend}
                   disabled={!input.trim() || isLoading}
-                  className="px-2.5 py-1.5 text-xs rounded-md bg-copper-500 text-white hover:bg-copper-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Send"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                  </svg>
-                </button>
+                  <Send />
+                </Button>
               </div>
             </div>
           </>

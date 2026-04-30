@@ -64,14 +64,18 @@ export function RegionSelector({
     [documentRef, zoom]
   );
 
-  /** Get coordinates relative to the overlay (for visual display of the selection box) */
+  /** Get coordinates relative to the overlay, in pre-zoom layout space.
+   *  The overlay sits inside the zoomed document container, so a child
+   *  positioned at `left: N` is visually drawn at N*zoom from the overlay's
+   *  top-left. Dividing the visual offset by zoom keeps the selection box
+   *  visually anchored to the pointer at any zoom. */
   const getOverlayRelativeCoordinates = useCallback(
     (e: PointerEvent): { x: number; y: number } => {
       if (!overlayRef.current) return { x: 0, y: 0 };
       const rect = overlayRef.current.getBoundingClientRect();
-      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      return { x: (e.clientX - rect.left) / zoom, y: (e.clientY - rect.top) / zoom };
     },
-    []
+    [zoom]
   );
 
   const [displayDrag, setDisplayDrag] = useState<DragState | null>(null);

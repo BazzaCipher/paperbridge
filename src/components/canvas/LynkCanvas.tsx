@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import {
   ReactFlow,
   Background,
-  Controls,
   useReactFlow,
   type Connection,
   type Edge,
@@ -14,9 +13,9 @@ import '@xyflow/react/dist/style.css';
 
 import { useCanvasStore } from '../../store/canvasStore';
 import { getNodeTypes } from '../../core/nodes/nodeRegistry';
-import { FileControls } from './Toolbar';
+import { TopBar } from './TopBar';
 import { NodeCreationBar } from './NodeCreationBar';
-import { UndoRedoControls } from './UndoRedoControls';
+import { CanvasZoomControls } from './CanvasZoomControls';
 import { PanelToggle } from './PanelToggle';
 import { ConnectionLine } from './ConnectionLine';
 import { LayoutControls } from './LayoutControls';
@@ -599,15 +598,12 @@ export function LynkCanvas() {
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
       >
-        {/* Top center: File controls + Undo/Redo */}
+        {/* Top center: unified chrome bar */}
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 max-w-[calc(100vw-6rem)]">
-          <div className="flex items-center gap-2">
-            <FileControls
-              focusName={focusNameInput}
-              onFocusNameHandled={clearFocusName}
-            />
-            <UndoRedoControls />
-          </div>
+          <TopBar
+            focusName={focusNameInput}
+            onFocusNameHandled={clearFocusName}
+          />
           {nodes.length > 0 && <SuggestionBar />}
         </div>
 
@@ -670,7 +666,7 @@ export function LynkCanvas() {
           maxZoom={4}
         >
           <Background gap={16} size={1} />
-          <Controls />
+          <CanvasZoomControls />
           <LayoutControls />
         </ReactFlow>
         {isDragOver && (

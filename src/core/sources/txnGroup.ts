@@ -195,7 +195,10 @@ export function materializedTableToTxnGroup(
       else if (Number.isFinite(debit) && debit !== 0) amount = -Math.abs(debit);
       else amount = 0;
     }
-    if (!Number.isFinite(amount)) continue;
+    // Keep the row even when amount is unparseable — set to 0 so the user
+    // can correct the column mapping after the fact rather than silently
+    // losing transactions that the heuristic couldn't classify.
+    if (!Number.isFinite(amount)) amount = 0;
 
     const balance = balanceCol >= 0
       ? parseSignedAmount(row[balanceCol] ?? '', { negativeParens: true, currencySymbols: true })
@@ -299,8 +302,18 @@ export function regionsToInvoiceTxnGroup(
 
 // ─── Auto-detect mapping ──────────────────────────────────────────────────
 
+// Strict whole-cell match used by content scoring in scoreContent().
 const DATE_RE = /^\d{1,2}[\/\- ]\d{1,2}[\/\- ]\d{2,4}$|^\d{4}-\d{2}-\d{2}$|^\d{1,2}[\s\-][A-Za-z]{3,9}[\s\-]\d{2,4}$/;
+// Permissive substring match used by content-based mapping inference: many
+// bank statements omit the year ("12/03", "12 Mar"), and OCR can leave stray
+// whitespace or punctuation. Substring is safe here because the column needs
+// to score >= 0.5 across all populated cells before we pick it as a date col.
+const DATE_LIKE_RE =
+  /\b\d{1,2}[\/\-.]\d{1,2}(?:[\/\-.]\d{2,4})?\b|\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+\d{1,2}\b|\b\d{4}-\d{2}-\d{2}\b/i;
 const MONEY_RE = /^[\$\-\(]?[A-Z]{0,3}\$?\s?[\d,]+\.\d{2}\)?-?$/;
+// Permissive money: allows whole-dollar amounts and trailing CR/DR markers
+// commonly seen on statements.
+const MONEY_LIKE_RE = /^[\$\-\(]?[A-Z]{0,3}\$?\s?[\d,]+(?:\.\d{1,2})?\s?(?:\)|-|CR|DR)?$/i;
 
 interface ColumnScores {
   date: number;
@@ -410,60 +423,63 @@ export function inferMappingFromContent(table: MaterializedTable): SuggestedMapp
   const stats = headers.map((_, colIdx) => {
     const cells = rows.map((r) => (r[colIdx] ?? '').trim()).filter(Boolean);
     const total = cells.length || 1;
-    const dates = cells.filter((c) => DATE_RE.test(c)).length / total;
-    const money = cells.filter((c) => MONEY_RE.test(c.replace(/\s/g, ''))).length / total;
+    const dates = cells.filter((c) => DATE_LIKE_RE.test(c)).length / total;
+    const money = cells.filter((c) => MONEY_LIKE_RE.test(c.replace(/\s/g, ''))).length / total;
     const avgLen = cells.reduce((a, c) => a + c.length, 0) / total;
     const wordCount = cells.reduce((a, c) => a + c.split(/\s+/).length, 0) / total;
     return { colIdx, dates, money, avgLen, wordCount };
   });
 
+  // Greedy picks: always assign each role to its best-scoring unused column,
+  // even when the score is 0. Table mode is "I want a TxnGroup from this" —
+  // an obviously-wrong column the user can re-tag is better than no group at
+  // all. confidence reflects scoring quality so the keyword path still wins
+  // when both succeed.
   const used = new Set<number>();
-  const pickBy = (key: 'dates' | 'money', minRatio: number, prefer?: 'highest' | 'lowest'): number => {
-    const candidates = stats.filter((s) => !used.has(s.colIdx) && s[key] >= minRatio);
+  const pickHighest = (key: 'dates' | 'money', preferLeft = false): number => {
+    const candidates = stats.filter((s) => !used.has(s.colIdx));
     if (candidates.length === 0) return -1;
-    candidates.sort((a, b) => b[key] - a[key]);
-    let pick = candidates[0];
-    if (prefer === 'lowest') {
-      // Among similarly-money columns, balance is usually the rightmost / largest avg.
-      // For amount we want the one that's NOT balance: tie-break by lower colIdx.
-      candidates.sort((a, b) => a.colIdx - b.colIdx);
-      pick = candidates[0];
-    }
-    used.add(pick.colIdx);
-    return pick.colIdx;
+    candidates.sort((a, b) => {
+      if (b[key] !== a[key]) return b[key] - a[key];
+      return preferLeft ? a.colIdx - b.colIdx : b.colIdx - a.colIdx;
+    });
+    used.add(candidates[0].colIdx);
+    return candidates[0].colIdx;
   };
 
-  const dateIdx = pickBy('dates', 0.5);
-  if (dateIdx === -1) return { mapping: null, confidence: 0 };
+  const dateIdx = pickHighest('dates', true);
+  const amountIdx = pickHighest('money', true);
 
-  const amountIdx = pickBy('money', 0.5, 'lowest');
-  if (amountIdx === -1) return { mapping: null, confidence: 0 };
-
-  // Balance: a second money column to the right of amount.
+  // Balance: a money-shaped column to the right of amount, only if it
+  // genuinely scores. Otherwise leave undefined.
   const balanceIdx = stats
     .filter((s) => !used.has(s.colIdx) && s.money >= 0.5 && s.colIdx > amountIdx)
     .sort((a, b) => b.money - a.money)[0]?.colIdx;
   if (balanceIdx !== undefined) used.add(balanceIdx);
 
-  // Description: longest unused text column (most words / highest avg length).
+  // Description: longest remaining text-like column. If nothing is left,
+  // reuse the most word-heavy column overall (excluding the date column).
   const descCandidates = stats
-    .filter((s) => !used.has(s.colIdx) && s.dates < 0.3 && s.money < 0.3)
+    .filter((s) => !used.has(s.colIdx))
     .sort((a, b) => b.wordCount - a.wordCount || b.avgLen - a.avgLen);
-  const descIdx = descCandidates[0]?.colIdx ?? -1;
-  if (descIdx === -1) return { mapping: null, confidence: 0 };
+  const descIdx =
+    descCandidates[0]?.colIdx ??
+    stats
+      .filter((s) => s.colIdx !== dateIdx)
+      .sort((a, b) => b.wordCount - a.wordCount)[0]?.colIdx ??
+    (dateIdx >= 0 ? dateIdx : 0);
 
   const mapping: BankColumnMapping = {
-    date: headers[dateIdx],
-    description: headers[descIdx],
-    amount: headers[amountIdx],
+    date: dateIdx >= 0 ? headers[dateIdx] : '',
+    description: descIdx >= 0 ? headers[descIdx] : '',
+    amount: amountIdx >= 0 ? headers[amountIdx] : undefined,
     balance: balanceIdx !== undefined ? headers[balanceIdx] : undefined,
   };
 
   // Confidence reflects content quality, capped well below the keyword-based
   // path so a header match still wins when both succeed.
-  const confidence = Math.min(
-    0.7,
-    (stats[dateIdx].dates + stats[amountIdx].money) / 2,
-  );
+  const dateScore = dateIdx >= 0 ? stats[dateIdx].dates : 0;
+  const moneyScore = amountIdx >= 0 ? stats[amountIdx].money : 0;
+  const confidence = Math.min(0.7, (dateScore + moneyScore) / 2);
   return { mapping, confidence };
 }

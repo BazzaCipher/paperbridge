@@ -25,6 +25,9 @@ import { useNodeOutputs } from '../../hooks/useNodeOutputs';
 import { useSyncNodeOutputs } from '../../hooks/useSyncNodeOutputs';
 import { getColorForType, getCompatibleTypes } from '../../utils/colors';
 import { generateId } from '../../utils/id';
+import { debug } from '../../utils/debug'; // see src/utils/debug.ts
+
+const log = debug('extractor');
 import { createRegionFromBox, createRegionFromText, roleFromFieldType } from '../../utils/regions';
 import { BlobRegistry } from '../../store/canvasPersistence';
 import { FilePickerModal } from '../ui/FilePickerModal';
@@ -204,6 +207,13 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     const standalone = data.regions.filter((r) => !r.tableSourceId);
     const hasAmount = standalone.some((r) => r.role === 'amount');
     const persistedId = data.invoiceTxnGroupId;
+    log('invoice-effect', {
+      nodeId: id,
+      standalone: standalone.length,
+      roles: standalone.map((r) => r.role).filter(Boolean),
+      hasAmount,
+      persistedId,
+    });
 
     if (!hasAmount) {
       if (persistedId) {
@@ -381,6 +391,13 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
 
         let txnGroupId: string | undefined;
         const suggested = suggestBankMapping(table);
+        log('table-mapping', {
+          nodeId: id,
+          headers: table.headers,
+          rows: table.rows.length,
+          mapping: suggested.mapping,
+          confidence: suggested.confidence,
+        });
         if (suggested.mapping && suggested.confidence >= 0.7) {
           const group = materializedTableToTxnGroup(table, suggested.mapping, {
             nodeId: id,

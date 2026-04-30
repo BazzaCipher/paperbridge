@@ -4,6 +4,9 @@ import { CanExport, CanImport, CalculationNode, ExtractorNode, DisplayNode, View
 import { wouldCreateCycle } from './dependencyGraph';
 import { getOperation, isTypeCompatible } from '../operations/operationRegistry';
 import { txnGroupHandle } from '../handles/txnGroup';
+import { debug } from '../../utils/debug'; // see src/utils/debug.ts
+
+const log = debug('canvas');
 
 export interface ConnectionValidationContext {
   nodes: LynkNode[];
@@ -16,6 +19,22 @@ export interface ConnectionValidationResult {
 }
 
 export function validateConnection(
+  connection: {
+    source?: string | null;
+    target?: string | null;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  },
+  context: ConnectionValidationContext
+): ConnectionValidationResult {
+  const result = _validate(connection, context);
+  if (!result.valid) {
+    log('reject', { reason: result.reason, ...connection });
+  }
+  return result;
+}
+
+function _validate(
   connection: {
     source?: string | null;
     target?: string | null;

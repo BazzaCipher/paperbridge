@@ -12,6 +12,9 @@
  */
 
 import type { TxnGroup, Transaction } from '../sources/txnGroup';
+import { debug } from '../../utils/debug'; // see src/utils/debug.ts
+
+const log = debug('reconcile');
 
 export interface ReconcileOptions {
   /** Absolute tolerance on signed amount, e.g. 0.01. */
@@ -161,6 +164,13 @@ export function reconcile(
 
   const onlyInA = a.transactions.filter((_, i) => !usedA.has(i));
   const onlyInB = b.transactions.filter((_, i) => !usedB.has(i));
+
+  log('result', {
+    matched: matched.length,
+    onlyInA: onlyInA.length,
+    onlyInB: onlyInB.length,
+    candidates: candidates.length,
+  });
 
   return { matched, onlyInA, onlyInB };
 }

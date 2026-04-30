@@ -1,5 +1,8 @@
 import Tesseract from 'tesseract.js';
 import type { DataValue, RegionCoordinates } from '../../types';
+import { debug } from '../../utils/debug'; // see src/utils/debug.ts
+
+const log = debug('ocr');
 
 let worker: Tesseract.Worker | null = null;
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -205,6 +208,12 @@ export async function extractFullPageFromRegion(
     canvas.width,
     canvas.height,
   );
+  log('crop', {
+    region,
+    src,
+    canvas: { w: canvas.width, h: canvas.height },
+    natural: { w: img instanceof HTMLImageElement ? img.naturalWidth : img.width, h: img instanceof HTMLImageElement ? img.naturalHeight : img.height },
+  });
   return extractFullPage(canvas);
 }
 

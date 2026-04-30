@@ -110,8 +110,10 @@ export function RegionList({
 
   // Compact view - just show values with type indicator
   if (compact) {
-    const txnRegions = regions.filter((r) => r.role && !r.tableSourceId);
-    const fieldRegions = regions.filter((r) => !(r.role && !r.tableSourceId));
+    // Skip table-owned rows — they live in the TxnGroup, not the field list.
+    const standalone = regions.filter((r) => !r.tableSourceId);
+    const txnRegions = standalone.filter((r) => r.role);
+    const fieldRegions = standalone.filter((r) => !r.role);
 
     const renderRow = (region: ExtractedRegion, opts?: { roleLed?: boolean }) => {
       const displayValue = getDisplayValue(region);
@@ -197,7 +199,9 @@ export function RegionList({
     );
   }
 
-  // Full view - editable with all controls
+  // Full view - editable with all controls.
+  // Hide table-owned rows; they're represented by their TxnGroup.
+  const visibleRegions = regions.filter((r) => !r.tableSourceId);
   return (
     <div className="divide-y divide-paper-100">
       {/* Toggle header */}
@@ -215,7 +219,7 @@ export function RegionList({
 
       {/* Collapsed view - name + value only */}
       {collapsedView ? (
-        regions.map((region) => {
+        visibleRegions.map((region) => {
           const displayValue = getDisplayValue(region);
           const typeColor = getTypeBadgeClass(region.dataType);
           const isExternal = isExternallyHighlighted(region.id);
@@ -242,7 +246,7 @@ export function RegionList({
         })
       ) : (
         /* Full editable view */
-        regions.map((region) => {
+        visibleRegions.map((region) => {
           const displayValue = getDisplayValue(region);
           const rawValue = getRawValue(region);
           const hasValue = rawValue !== '';

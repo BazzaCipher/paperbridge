@@ -75,6 +75,38 @@ const ExtractedRegionSchema = z.object({
   color: z.string(),
   valueCache: ValueCacheSchema.optional(),
   role: z.enum(['amount', 'date', 'description']).optional(),
+  // Table-row regions: link back to the parent TableRecord on the node so
+  // the row stays grouped and the parent table can re-materialize.
+  tableSourceId: z.string().optional(),
+  tableRowIndex: z.number().optional(),
+  cells: z.record(z.string(), z.string()).optional(),
+});
+
+// Bounding box in normalized 0-1 page coords
+const BBoxSchema = z.object({
+  x0: z.number(),
+  y0: z.number(),
+  x1: z.number(),
+  y1: z.number(),
+});
+
+// Table selection: bbox + row/col separators (normalized) + optional header row
+const TableSelectionSchema = z.object({
+  bbox: BBoxSchema,
+  rowYs: z.array(z.number()),
+  colXs: z.array(z.number()),
+  headerRowIndex: z.number().optional(),
+});
+
+// Table record stored on an ExtractorNode: pairs the user's bbox with the
+// spatial separators that produced its rows + the optional TxnGroup id.
+const TableRecordSchema = z.object({
+  id: z.string(),
+  pageNumber: z.number(),
+  pageBbox: RegionCoordinatesSchema,
+  pageSize: z.object({ width: z.number(), height: z.number() }),
+  selection: TableSelectionSchema,
+  txnGroupId: z.string().optional(),
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -175,6 +207,10 @@ const ExtractorNodeDataSchema = FileNodeDataSchema.extend({
   totalPages: z.number(),
   outputs: z.record(z.string(), z.any()).optional(), // Runtime computed
   invoiceTxnGroupId: z.string().optional(),
+  // Materialized tables produced by table-mode selection. Each entry persists
+  // the user's bbox + row/col separators so the table can be re-materialized
+  // and its TxnGroup handle re-rendered after reload.
+  tables: z.array(TableRecordSchema).optional(),
 });
 
 // Calculation result - uses SimpleDataType (no complex types)
@@ -340,6 +376,42 @@ const VirtualFolderSchema = z.object({
   parentId: z.string().nullable(),
 });
 
+// TxnGroup payload — must round-trip cleanly so tables[].txnGroupId references
+// stay live after reload. Mirrors the TxnGroup interface in
+// core/sources/txnGroup.ts.
+const TransactionSchema = z.object({
+  id: z.string(),
+  amount: z.number(),
+  date: z.string(),
+  description: z.string(),
+  raw: z.record(z.string(), z.string()).optional(),
+  sourceNodeId: z.string(),
+  sourceRowId: z.string(),
+});
+
+const BankStatementMetaSchema = z.object({
+  account: z.string().optional(),
+  currency: z.string().optional(),
+  statementPeriod: z.object({ from: z.string(), to: z.string() }).optional(),
+  openingBalance: z.number().optional(),
+  closingBalance: z.number().optional(),
+});
+
+const TxnGroupSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  transactions: z.array(TransactionSchema),
+  origin: z.object({
+    kind: z.enum(['bank', 'invoice', 'aggregated']),
+    nodeIds: z.array(z.string()),
+    extractedAt: z.string(),
+    sourceHeaders: z.array(z.string()).optional(),
+    fileId: z.string().optional(),
+    pageRange: z.tuple([z.number(), z.number()]).optional(),
+  }),
+  meta: BankStatementMetaSchema.optional(),
+});
+
 export const CanvasStateSchema = z.object({
   version: z.string(),
   metadata: MetadataSchema,
@@ -348,6 +420,9 @@ export const CanvasStateSchema = z.object({
   viewport: ViewportSchema,
   embedded: z.record(z.string(), z.unknown()).optional(),
   virtualFolders: z.array(VirtualFolderSchema).optional(),
+  // TxnGroup slice contents; keyed by id. Optional for backward compatibility
+  // with canvases saved before TxnGroup persistence existed.
+  txnGroups: z.record(z.string(), TxnGroupSchema).optional(),
 });
 
 export type ValidatedCanvasState = z.infer<typeof CanvasStateSchema>;

@@ -7,6 +7,7 @@
 
 import type { LynkNode, CanvasState } from '../types';
 import type { VirtualFolder } from '../store/canvasPersistence';
+import type { TxnGroup } from '../core/sources/txnGroup';
 import { CanvasStateSchema } from '../schemas/canvas';
 import { clearLocalStorageDraft } from '../hooks/useLocalStorageSync';
 import { defaultPipeline, type ValidationResult, type ExportedCanvas } from '../store/codecs';
@@ -25,6 +26,7 @@ export interface CanvasData {
   canvasId: string;
   lastSaved: string | null;
   virtualFolders?: VirtualFolder[];
+  txnGroups?: Record<string, TxnGroup>;
 }
 
 export interface ImportResult {
@@ -55,6 +57,7 @@ export function exportCanvas(data: CanvasData): CanvasState {
     edges: data.edges,
     viewport: data.viewport,
     virtualFolders: data.virtualFolders,
+    txnGroups: data.txnGroups,
   };
 }
 
@@ -102,6 +105,7 @@ export function importCanvas(state: ExportedCanvas): ImportResult {
       canvasId: restoredState.metadata.id,
       lastSaved: restoredState.metadata.updatedAt,
       virtualFolders: restoredState.virtualFolders,
+      txnGroups: restoredState.txnGroups,
     },
   };
 }

@@ -191,6 +191,9 @@ export async function extractFullPageFromRegion(
   const src = scaleRegionToNatural(img, region);
   canvas.width = Math.max(1, Math.round(src.width));
   canvas.height = Math.max(1, Math.round(src.height));
+  // Fill white so any alpha/out-of-bounds pixels don't read as black to OCR.
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(
     img,
     src.x,
@@ -202,40 +205,6 @@ export async function extractFullPageFromRegion(
     canvas.width,
     canvas.height,
   );
-  // Debug: open the source AND the cropped region in new tabs.
-  if (typeof window !== 'undefined') {
-    try {
-      const naturalW = img instanceof HTMLImageElement ? img.naturalWidth : img.width;
-      const naturalH = img instanceof HTMLImageElement ? img.naturalHeight : img.height;
-      const cssW = (img as HTMLElement).clientWidth;
-      const cssH = (img as HTMLElement).clientHeight;
-
-      // Source dump
-      const srcCanvas = document.createElement('canvas');
-      srcCanvas.width = naturalW;
-      srcCanvas.height = naturalH;
-      const srcCtx = srcCanvas.getContext('2d');
-      if (srcCtx) srcCtx.drawImage(img, 0, 0);
-      const srcUrl = srcCanvas.toDataURL('image/png');
-      const cropUrl = canvas.toDataURL('image/png');
-
-      console.log('[table-crop]', {
-        region,
-        scaled: src,
-        natural: { w: naturalW, h: naturalH },
-        css: { w: cssW, h: cssH },
-        canvasOut: { w: canvas.width, h: canvas.height },
-        srcKind: img.constructor.name,
-        srcInDom: (img as HTMLElement).isConnected,
-        cropDataLen: cropUrl.length,
-        srcDataLen: srcUrl.length,
-      });
-      window.open(srcUrl, '_blank');
-      window.open(cropUrl, '_blank');
-    } catch (e) {
-      console.warn('[table-crop] could not preview:', e);
-    }
-  }
   return extractFullPage(canvas);
 }
 
@@ -302,8 +271,10 @@ export async function extractFullPage(
   const imageWidth = img instanceof HTMLImageElement ? img.naturalWidth : img.width;
   const imageHeight = img instanceof HTMLImageElement ? img.naturalHeight : img.height;
 
-  // Run OCR on the full image
-  const result = await tesseractWorker.recognize(img);
+  // Run OCR on the full image. Tesseract.js v5+ requires opting in to
+  // structured output (blocks/paragraphs/lines/words); without this only
+  // `data.text` is populated.
+  const result = await tesseractWorker.recognize(img, {}, { blocks: true });
 
   // Tesseract structure: Page -> blocks[] -> paragraphs[] -> lines[] -> words[]
   // Flatten the hierarchy to get all words and lines

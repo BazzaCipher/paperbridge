@@ -110,56 +110,83 @@ export function RegionList({
 
   // Compact view - just show values with type indicator
   if (compact) {
+    const txnRegions = regions.filter((r) => r.role && !r.tableSourceId);
+    const fieldRegions = regions.filter((r) => !(r.role && !r.tableSourceId));
+
+    const renderRow = (region: ExtractedRegion, opts?: { roleLed?: boolean }) => {
+      const displayValue = getDisplayValue(region);
+      const typeColor = getTypeBadgeClass(region.dataType);
+      const isExternal = isExternallyHighlighted(region.id);
+      const roleLabel = region.role === 'description' ? 'Desc' : region.role
+        ? region.role.charAt(0).toUpperCase() + region.role.slice(1)
+        : null;
+
+      return (
+        <NodeEntry
+          key={region.id}
+          id={region.id}
+          handleType="source"
+          handlePosition={Position.Right}
+          handleColor={region.color}
+          className={`group hover:bg-paper-50 cursor-pointer ${
+            selectedRegionId === region.id ? 'bg-copper-400/10' : ''
+          } ${isExternal ? 'bg-copper-400/20 ring-2 ring-copper-400' : ''}`}
+        >
+          <div
+            className="flex items-center gap-2 flex-1 min-w-0 py-0.5"
+            onClick={() => onRegionSelect(region.id)}
+          >
+            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${typeColor}`} />
+            {opts?.roleLed && roleLabel ? (
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 w-12 flex-shrink-0">
+                {roleLabel}
+              </span>
+            ) : (
+              <span className="text-xs text-bridge-500 truncate max-w-[80px]">
+                {region.label}
+              </span>
+            )}
+            <span className={`text-sm font-medium truncate flex-1 ${
+              displayValue ? 'text-bridge-900' : 'text-bridge-400'
+            }`}>
+              {displayValue || '(empty)'}
+            </span>
+          </div>
+        </NodeEntry>
+      );
+    };
+
     return (
       <div className="divide-y divide-paper-100">
-        {regions.map((region) => {
-          const displayValue = getDisplayValue(region);
-          const typeColor = getTypeBadgeClass(region.dataType);
-          const isExternal = isExternallyHighlighted(region.id);
-
-          return (
-            <NodeEntry
-              key={region.id}
-              id={region.id}
-              handleType="source"
-              handlePosition={Position.Right}
-              handleColor={region.color}
-              className={`group hover:bg-paper-50 cursor-pointer ${
-                selectedRegionId === region.id ? 'bg-copper-400/10' : ''
-              } ${isExternal ? 'bg-copper-400/20 ring-2 ring-copper-400' : ''}`}
-            >
-              <div
-                className="flex items-center gap-2 flex-1 min-w-0 py-0.5"
-                onClick={() => onRegionSelect(region.id)}
-              >
-                {/* Type color indicator */}
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${typeColor}`} />
-
-                {/* Label */}
-                <span className="text-xs text-bridge-500 truncate max-w-[60px]">
-                  {region.label}
-                </span>
-
-                {/* Role chip */}
-                {region.role && (
-                  <span
-                    className="text-[9px] px-1 rounded bg-emerald-100 text-emerald-700 flex-shrink-0"
-                    title={`Role: ${region.role}`}
-                  >
-                    {region.role === 'description' ? 'desc' : region.role}
-                  </span>
-                )}
-
-                {/* Value */}
-                <span className={`text-sm font-medium truncate flex-1 ${
-                  displayValue ? 'text-bridge-900' : 'text-bridge-400'
-                }`}>
-                  {displayValue || '(empty)'}
+        {txnRegions.length > 0 && (
+          <div className="border-l-2 border-emerald-400">
+            <div className="px-3 py-1 bg-emerald-50/60 flex items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                Transaction
+              </span>
+              <span className="text-[10px] text-bridge-400">
+                feeds txngroup handle
+              </span>
+            </div>
+            <div className="divide-y divide-paper-100">
+              {txnRegions.map((r) => renderRow(r, { roleLed: true }))}
+            </div>
+          </div>
+        )}
+        {fieldRegions.length > 0 && (
+          <div>
+            {txnRegions.length > 0 && (
+              <div className="px-3 py-1 bg-paper-50">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-bridge-500">
+                  Fields
                 </span>
               </div>
-            </NodeEntry>
-          );
-        })}
+            )}
+            <div className="divide-y divide-paper-100">
+              {fieldRegions.map((r) => renderRow(r))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -272,8 +299,9 @@ export function RegionList({
                 ))}
               </div>
 
-              {/* Reconciliation role tag - only when handler is wired */}
-              {onRegionRoleChange && (
+              {/* Reconciliation role tag - only standalone regions; table rows
+                  belong to their parent TxnGroup and aren't tagged individually. */}
+              {onRegionRoleChange && !region.tableSourceId && (
                 <div className="flex items-center gap-1 mb-2 text-[10px]">
                   <span className="text-bridge-400 mr-1">Role:</span>
                   {([

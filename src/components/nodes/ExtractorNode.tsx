@@ -198,7 +198,11 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
   // Single-Transaction TxnGroup emitted when any region has role: 'amount'.
   // Synced into txnGroupSlice; id persisted on data.invoiceTxnGroupId.
   useEffect(() => {
-    const hasAmount = data.regions.some((r) => r.role === 'amount');
+    // Only standalone box/text regions feed the invoice TxnGroup. Regions
+    // owned by a table already participate in that table's TxnGroup; double
+    // counting them would race the two effects and emit a conflicting group.
+    const standalone = data.regions.filter((r) => !r.tableSourceId);
+    const hasAmount = standalone.some((r) => r.role === 'amount');
     const persistedId = data.invoiceTxnGroupId;
 
     if (!hasAmount) {
@@ -209,7 +213,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       return;
     }
 
-    const tagged = data.regions
+    const tagged = standalone
       .filter((r) => r.role)
       .map((r) => ({
         id: r.id,

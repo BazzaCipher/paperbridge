@@ -574,6 +574,17 @@ export function LynkCanvas() {
 
   return (
     <div className="w-full h-full flex flex-col">
+    {/* Top center: unified chrome bar — fixed to viewport so side panels don't shift it */}
+    <div className="pointer-events-none fixed top-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 max-w-[calc(100vw-6rem)]">
+      <div className="pointer-events-auto">
+        <TopBar focusName={focusNameInput} onFocusNameHandled={clearFocusName} />
+      </div>
+      {nodes.length > 0 && (
+        <div className="pointer-events-auto">
+          <SuggestionBar />
+        </div>
+      )}
+    </div>
     <div className="flex flex-1 min-h-0">
       <ProjectSidebar
         open={sidebarOpen}
@@ -598,15 +609,6 @@ export function LynkCanvas() {
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
       >
-        {/* Top center: unified chrome bar */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 max-w-[calc(100vw-6rem)]">
-          <TopBar
-            focusName={focusNameInput}
-            onFocusNameHandled={clearFocusName}
-          />
-          {nodes.length > 0 && <SuggestionBar />}
-        </div>
-
         {/* Left: Projects panel toggle */}
         <PanelToggle
           side="left"

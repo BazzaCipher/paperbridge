@@ -548,6 +548,33 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       const group = getTxnGroup(groupId);
       if (!ocr || !group) return;
       const table = materializeTable(nextSelection, ocr, tableRecord.pageSize);
+
+      // Re-run bank mapping against the new columns so date/desc/amount get
+      // re-derived. Without this, raw cells update but the structured fields
+      // keep stale values from the old (under-segmented) columns.
+      const headerSuggest = suggestBankMapping(table);
+      const useHeader = headerSuggest.mapping && headerSuggest.confidence >= 0.7;
+      const contentSuggest = useHeader ? null : inferMappingFromContent(table);
+      const finalMapping = useHeader ? headerSuggest.mapping : contentSuggest?.mapping ?? null;
+
+      if (finalMapping) {
+        const remapped = materializedTableToTxnGroup(table, finalMapping, {
+          nodeId: id,
+          label: group.label,
+          fileId: data.fileId ?? '',
+          pageRange: (group.origin.kind === 'bank' ? group.origin.pageRange : undefined) ?? [1, 1],
+        });
+        if (remapped.transactions.length > 0) {
+          updateTxnGroup(groupId, {
+            label: group.label,
+            transactions: remapped.transactions,
+            origin: remapped.origin,
+          });
+          return;
+        }
+      }
+
+      // Fallback: only update raw cells if mapping fails (preserve prior fields)
       const headerIdx = nextSelection.headerRowIndex;
       const headers =
         headerIdx !== undefined ? table.rows[headerIdx] : table.headers.length ? table.headers : table.rows[0]?.map((_, i) => `Column ${i + 1}`) ?? [];

@@ -293,15 +293,24 @@ export async function detectTableWithAI(
 ): Promise<TableSelection> {
   const { images, ocrWords, hintBbox } = options;
 
-  let userContent = 'Detect the spatial layout of the table in this image. Return ONLY the JSON object with bbox, rowYs, colXs, headerRowIndex. Do NOT include cell text.';
+  let userContent = 'Detect the spatial layout of the table in this image. The image IS the table region — return colXs and rowYs as fractions (0-1) of THIS image. Return ONLY the JSON object with bbox, rowYs, colXs, headerRowIndex. Do NOT include cell text.';
   if (hintBbox) {
     userContent += `\n\nUser-drawn region (normalized 0-1 of page): ${JSON.stringify(hintBbox)}. Constrain bbox to this region.`;
   }
   if (ocrWords?.length) {
+    // Normalize OCR boxes to 0-1 of the crop using the first image's intrinsic dims if available,
+    // otherwise pass pixels and tell the model so. Words are already in crop-pixel space.
+    const maxX = ocrWords.reduce((m, w) => Math.max(m, w.bbox.x1), 0) || 1;
+    const maxY = ocrWords.reduce((m, w) => Math.max(m, w.bbox.y1), 0) || 1;
     const ocrData = ocrWords.map((w) => ({
-      b: [w.bbox.x0, w.bbox.y0, w.bbox.x1, w.bbox.y1],
+      b: [
+        +(w.bbox.x0 / maxX).toFixed(4),
+        +(w.bbox.y0 / maxY).toFixed(4),
+        +(w.bbox.x1 / maxX).toFixed(4),
+        +(w.bbox.y1 / maxY).toFixed(4),
+      ],
     }));
-    userContent += `\n\nOCR word boxes [x0,y0,x1,y1] in pixels:\n${JSON.stringify(ocrData)}`;
+    userContent += `\n\nOCR word boxes [x0,y0,x1,y1] normalized 0-1 of the crop (use these to verify alignment, place colXs in vertical gaps between word clusters):\n${JSON.stringify(ocrData)}`;
   }
 
   const content = await callAi({

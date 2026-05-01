@@ -639,8 +639,12 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
 
   const handleAutoFixColumns = useCallback(
     async (tableId: string) => {
+      console.log('[auto-fix] click', { tableId });
       const tableRecord = (data.tables ?? []).find((t) => t.id === tableId);
-      if (!tableRecord) return;
+      if (!tableRecord) {
+        showToast('Table not found', 'error');
+        return;
+      }
       if (!activeProvider || !activeConfig?.apiKey) {
         showToast('Configure an AI provider in settings first', 'warning');
         return;
@@ -650,11 +654,19 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       else if (data.fileType === 'image' && data.fileUrl) imageSource = data.fileUrl;
       else { showToast('Document not ready', 'warning'); return; }
 
+      showToast('Asking AI to detect columns…', 'info');
       try {
         const cropImage = await cropRegionToDataUrl(imageSource, tableRecord.pageBbox);
         let ocr = tableOcrCache.get(tableId);
         if (!ocr) ocr = await extractFullPageFromRegion(imageSource, tableRecord.pageBbox);
         tableOcrCache.set(tableId, ocr);
+        console.log('[auto-fix] sending', {
+          provider: activeProvider.id,
+          model: activeConfig.selectedModel,
+          ocrWords: ocr.words.length,
+          imageBytes: cropImage.base64.length,
+          currentColXs: tableRecord.selection.colXs,
+        });
         const detected = await detectTableWithAI(
           {
             images: [cropImage],
@@ -665,16 +677,22 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           activeConfig.selectedModel,
           activeConfig.apiKey,
         );
+        console.log('[auto-fix] response', detected);
+        if (!Array.isArray(detected.colXs) || detected.colXs.length === 0) {
+          showToast('AI returned no column separators', 'warning');
+          return;
+        }
         applyColumnSelection(tableId, {
           ...tableRecord.selection,
           colXs: detected.colXs,
           rowYs: detected.rowYs.length ? detected.rowYs : tableRecord.selection.rowYs,
           headerRowIndex: detected.headerRowIndex ?? tableRecord.selection.headerRowIndex,
         });
-        showToast('Columns updated by AI', 'success');
+        showToast(`AI set ${detected.colXs.length + 1} columns`, 'success');
       } catch (err) {
-        console.warn('Auto-fix columns failed:', err);
-        showToast('AI column detection failed', 'error');
+        console.error('[auto-fix] failed', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        showToast(`AI column detection failed: ${msg}`, 'error');
       }
     },
     [data.tables, data.fileType, data.fileUrl, activeProvider, activeConfig, applyColumnSelection],

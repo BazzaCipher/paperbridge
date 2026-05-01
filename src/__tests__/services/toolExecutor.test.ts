@@ -99,7 +99,7 @@ function makeBlob(fileId: string, fileType: 'pdf' | 'image' = 'image') {
     mimeType: fileType === 'pdf' ? 'application/pdf' : 'image/png',
     size: 0,
     fileType,
-    nodeIds: new Set(),
+    nodeIds: new Set(), canvasId: 'c1',
   });
   blobData.set(fileId, blob);
 }

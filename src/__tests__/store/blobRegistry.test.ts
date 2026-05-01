@@ -28,7 +28,7 @@ describe('BlobRegistry', () => {
 
   it('registerWithMetadata creates metadata', async () => {
     const file = new File(['hello'], 'test.pdf', { type: 'application/pdf' });
-    const result = await BlobRegistry.registerWithMetadata(file, 'node-1');
+    const result = await BlobRegistry.registerWithMetadata(file, 'canvas-1', 'node-1');
     expect(result.isDuplicate).toBe(false);
     expect(result.metadata.fileName).toBe('test.pdf');
     expect(result.metadata.fileType).toBe('pdf');
@@ -38,8 +38,8 @@ describe('BlobRegistry', () => {
   it('registerWithMetadata detects duplicates', async () => {
     const file1 = new File(['same content'], 'a.pdf', { type: 'application/pdf' });
     const file2 = new File(['same content'], 'b.pdf', { type: 'application/pdf' });
-    const r1 = await BlobRegistry.registerWithMetadata(file1, 'n1');
-    const r2 = await BlobRegistry.registerWithMetadata(file2, 'n2');
+    const r1 = await BlobRegistry.registerWithMetadata(file1, 'canvas-1', 'n1');
+    const r2 = await BlobRegistry.registerWithMetadata(file2, 'canvas-1', 'n2');
     expect(r2.isDuplicate).toBe(true);
     expect(r2.existingFileId).toBe(r1.fileId);
     expect(r2.metadata.nodeIds.has('n2')).toBe(true);
@@ -47,21 +47,21 @@ describe('BlobRegistry', () => {
 
   it('registerWithMetadata with image file', async () => {
     const file = new File(['img'], 'photo.png', { type: 'image/png' });
-    const result = await BlobRegistry.registerWithMetadata(file);
+    const result = await BlobRegistry.registerWithMetadata(file, 'canvas-1');
     expect(result.metadata.fileType).toBe('image');
     expect(result.metadata.nodeIds.size).toBe(0);
   });
 
   it('registerWithMetadata with folderId', async () => {
     const file = new File(['data'], 'doc.pdf', { type: 'application/pdf' });
-    const result = await BlobRegistry.registerWithMetadata(file, undefined, 'folder-1');
+    const result = await BlobRegistry.registerWithMetadata(file, 'canvas-1', undefined, 'folder-1');
     expect(result.metadata.folderId).toBe('folder-1');
   });
 
   it('addNodeReference / removeNodeReference', () => {
     BlobRegistry.metadata.set('f1', {
       fileId: 'f1', fileName: 'test', mimeType: 'text/plain',
-      size: 0, fileType: 'image', contentHash: '', registeredAt: 0, nodeIds: new Set(),
+      size: 0, fileType: 'image', contentHash: '', registeredAt: 0, nodeIds: new Set(), canvasId: 'canvas-1',
     });
     BlobRegistry.addNodeReference('f1', 'n1');
     expect(BlobRegistry.getMetadata('f1')?.nodeIds.has('n1')).toBe(true);

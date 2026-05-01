@@ -7,6 +7,7 @@
 import type { CanvasState } from '../../types';
 import type { ValidationResult, ExportedCanvas } from '../codecs';
 import * as persistenceService from '../../services/canvasPersistence';
+import { BlobRegistry } from '../canvasPersistence';
 import { filterValidEdges } from '../../services/canvasValidation';
 import { generateId } from '../../utils/id';
 import type { StateCreator } from './types';
@@ -34,6 +35,8 @@ export const createPersistenceSlice: StateCreator<PersistenceSlice> = (set, get)
   lastSaved: null,
 
   clearCanvas: () => {
+    const oldCanvasId = get().canvasId;
+    BlobRegistry.removeCanvasFiles(oldCanvasId);
     set({
       nodes: [],
       edges: [],

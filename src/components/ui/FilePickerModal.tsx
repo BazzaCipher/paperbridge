@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Modal } from './Modal';
 import { BlobRegistry, type FileMetadata } from '../../store/canvasPersistence';
+import { useCanvasStore } from '../../store/canvasStore';
 import { getFileTypeColor } from '../../utils/colors';
 import { formatFileSize } from '../../utils/formatting';
 
@@ -12,7 +13,8 @@ interface FilePickerModalProps {
 
 export function FilePickerModal({ isOpen, onClose, onSelect }: FilePickerModalProps) {
   const [search, setSearch] = useState('');
-  const allFiles = BlobRegistry.getAllMetadata();
+  const canvasId = useCanvasStore((s) => s.canvasId);
+  const allFiles = BlobRegistry.getAllMetadata(canvasId);
 
   const filtered = search
     ? allFiles.filter((f) => f.fileName.toLowerCase().includes(search.toLowerCase()))

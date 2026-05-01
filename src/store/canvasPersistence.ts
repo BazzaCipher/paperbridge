@@ -21,6 +21,8 @@ export interface FileMetadata {
   registeredAt: number;
   nodeIds: Set<string>;
   folderId?: string;
+  /** Canvas (project) this file belongs to. Files are not shared across canvases. */
+  canvasId: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -96,13 +98,14 @@ export const BlobRegistry = {
 
   async registerWithMetadata(
     file: File,
+    canvasId: string,
     nodeId?: string,
     folderId?: string
   ): Promise<RegisterWithMetadataResult> {
     const contentHash = await computeHash(file);
 
-    // Check for existing file with same hash
-    const existing = this.findByHash(contentHash);
+    // Check for existing file with same hash, scoped to this canvas
+    const existing = this.findByHash(contentHash, canvasId);
     if (existing) {
       if (nodeId) {
         existing.nodeIds.add(nodeId);
@@ -131,6 +134,7 @@ export const BlobRegistry = {
       registeredAt: Date.now(),
       nodeIds: new Set(nodeId ? [nodeId] : []),
       folderId,
+      canvasId,
     };
 
     this.metadata.set(fileId, meta);
@@ -147,15 +151,29 @@ export const BlobRegistry = {
     return this.metadata.get(fileId);
   },
 
-  getAllMetadata(): FileMetadata[] {
-    return Array.from(this.metadata.values());
+  getAllMetadata(canvasId?: string): FileMetadata[] {
+    const all = Array.from(this.metadata.values());
+    return canvasId ? all.filter((m) => m.canvasId === canvasId) : all;
   },
 
-  findByHash(hash: string): FileMetadata | undefined {
+  findByHash(hash: string, canvasId?: string): FileMetadata | undefined {
     for (const meta of this.metadata.values()) {
-      if (meta.contentHash === hash) return meta;
+      if (meta.contentHash !== hash) continue;
+      if (canvasId && meta.canvasId !== canvasId) continue;
+      return meta;
     }
     return undefined;
+  },
+
+  /** Remove all files belonging to a canvas. Used when clearing the canvas. */
+  removeCanvasFiles(canvasId: string): void {
+    const toRemove: string[] = [];
+    for (const meta of this.metadata.values()) {
+      if (meta.canvasId === canvasId) toRemove.push(meta.fileId);
+    }
+    for (const fileId of toRemove) {
+      this.removeFile(fileId);
+    }
   },
 
   addNodeReference(fileId: string, nodeId: string): void {

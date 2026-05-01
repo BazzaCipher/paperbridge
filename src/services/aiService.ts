@@ -336,6 +336,71 @@ export async function detectTableWithAI(
   }
 }
 
+export interface ExtractTableVisionOptions {
+  images: Array<{ mimeType: string; base64: string }>;
+  /** Optional bbox hint in normalized 0-1 page coords. */
+  hintBbox?: { x0: number; y0: number; x1: number; y1: number };
+}
+
+export interface AiVisionTable {
+  selection: TableSelection;
+  /** Raw cell text in row-major order, including the header row at headerRowIndex. */
+  cells: string[][];
+}
+
+export async function extractTableWithAIVision(
+  options: ExtractTableVisionOptions,
+  provider: ProviderId,
+  model: string,
+  apiKey: string,
+): Promise<AiVisionTable> {
+  const { images, hintBbox } = options;
+
+  let userContent =
+    'Read the table in this image. Return JSON with bbox, colXs, rowYs, headerRowIndex, and cells (M rows x N columns of strings, including the header row). All coordinates are normalized 0-1 of THIS image (edge-to-edge). Read every cell directly from the image — do not hallucinate values, but do read low-quality text faithfully.';
+  if (hintBbox) {
+    userContent += `\n\nUser-drawn region (normalized 0-1 of page): ${JSON.stringify(hintBbox)}.`;
+  }
+
+  const content = await callAi({
+    provider,
+    model,
+    apiKey,
+    mode: 'extract_table',
+    messages: [{ role: 'user', content: userContent }],
+    images,
+  });
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = extractJsonObject(content);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse AI vision table response: ${msg}. Raw: ${content.slice(0, 200)}`);
+  }
+
+  const bbox = parsed.bbox as Record<string, number> | undefined;
+  const colXs = parsed.colXs as number[] | undefined;
+  const rowYs = parsed.rowYs as number[] | undefined;
+  const cells = parsed.cells as string[][] | undefined;
+  if (!bbox || typeof bbox.x0 !== 'number') throw new Error('Missing bbox');
+  if (!Array.isArray(colXs) || !Array.isArray(rowYs)) throw new Error('Missing colXs/rowYs');
+  if (!Array.isArray(cells)) throw new Error('Missing cells');
+
+  const headerRowIndex =
+    typeof parsed.headerRowIndex === 'number' ? parsed.headerRowIndex : undefined;
+
+  return {
+    selection: {
+      bbox: { x0: bbox.x0, y0: bbox.y0, x1: bbox.x1, y1: bbox.y1 },
+      colXs: [...colXs].sort((a, b) => a - b),
+      rowYs: [...rowYs].sort((a, b) => a - b),
+      headerRowIndex,
+    },
+    cells: cells.map((row) => (Array.isArray(row) ? row.map((c) => String(c ?? '')) : [])),
+  };
+}
+
 export interface AskAIOptions {
   onChunk?: (text: string) => void;
   onToolCall?: (toolName: string) => void;

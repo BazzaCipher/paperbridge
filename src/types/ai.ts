@@ -57,7 +57,7 @@ export interface AiChatRequest {
   provider: ProviderId;
   model: string;
   apiKey: string;
-  mode: 'detect_fields' | 'detect_table' | 'freeform' | 'auto_connect' | 'summarise';
+  mode: 'detect_fields' | 'detect_table' | 'extract_table' | 'freeform' | 'auto_connect' | 'summarise';
   ocrText?: string;
   /** For auto_connect: describes nodes and their fields */
   nodesContext?: AiNodeContext[];

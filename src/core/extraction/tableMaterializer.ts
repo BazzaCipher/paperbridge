@@ -140,3 +140,58 @@ export function materializeTable(
 
   return { headers, rows, cellBoxes: cellRowBoxes };
 }
+
+/**
+ * Build a MaterializedTable from explicit cell text (e.g. from AI vision)
+ * plus a TableSelection. cellBoxes are derived purely from the selection
+ * geometry against pageSize. Skips OCR bucketing entirely.
+ */
+export function materializeFromCells(
+  selection: TableSelection,
+  cells: string[][],
+  pageSize: PageSize,
+): MaterializedTable {
+  const W = pageSize.width;
+  const H = pageSize.height;
+  const px = {
+    x0: selection.bbox.x0 * W,
+    y0: selection.bbox.y0 * H,
+    x1: selection.bbox.x1 * W,
+    y1: selection.bbox.y1 * H,
+  };
+  const colSeps = denorm(selection.colXs, W);
+  const rowSeps = denorm(selection.rowYs, H);
+  const numCols = colSeps.length + 1;
+  const numRows = Math.max(rowSeps.length + 1, cells.length);
+
+  const colEdges = [px.x0, ...colSeps, px.x1];
+  const rowEdges = [px.y0, ...rowSeps, px.y1];
+
+  const allRows: string[][] = Array.from({ length: numRows }, (_, r) =>
+    Array.from({ length: numCols }, (_, c) => cells[r]?.[c] ?? ''),
+  );
+
+  const cellBoxes: BBox[][] = Array.from({ length: numRows }, (_, r) =>
+    Array.from({ length: numCols }, (_, c) => ({
+      x0: colEdges[c],
+      y0: rowEdges[r],
+      x1: colEdges[c + 1],
+      y1: rowEdges[r + 1],
+    })),
+  );
+
+  let headers: string[];
+  let rows: string[][];
+  let cellRowBoxes: BBox[][];
+  if (selection.headerRowIndex !== undefined && allRows[selection.headerRowIndex]) {
+    headers = allRows[selection.headerRowIndex].map((h, i) => h || `Column ${i + 1}`);
+    rows = allRows.filter((_, i) => i !== selection.headerRowIndex);
+    cellRowBoxes = cellBoxes.filter((_, i) => i !== selection.headerRowIndex);
+  } else {
+    headers = Array.from({ length: numCols }, (_, i) => `Column ${i + 1}`);
+    rows = allRows;
+    cellRowBoxes = cellBoxes;
+  }
+
+  return { headers, rows, cellBoxes: cellRowBoxes };
+}

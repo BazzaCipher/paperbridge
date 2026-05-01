@@ -15,8 +15,8 @@ import { FileDropZone } from '../ui/FileDropZone';
 import { extractTextFromRegion, extractFullPage, extractFullPageFromRegion, cropRegionToDataUrl, type FullPageOcrResult } from '../../core/extraction/ocrExtractor';
 import { detectFields, fieldOverlapsExisting } from '../../core/extraction/fieldDetector';
 import { buildTableSelectionFromOcr } from '../../core/extraction/tableParser';
-import { materializeTable, type TableSelection, type MaterializedTable } from '../../core/extraction/tableMaterializer';
-import { detectTableWithAI } from '../../services/aiService';
+import { materializeTable, materializeFromCells, type TableSelection, type MaterializedTable } from '../../core/extraction/tableMaterializer';
+import { detectTableWithAI, extractTableWithAIVision } from '../../services/aiService';
 import { suggestBankMapping, inferMappingFromContent, materializedTableToTxnGroup, singleTxnGroup } from '../../core/sources/txnGroup';
 import { useAiSettings } from '../../hooks/useAiSettings';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -643,8 +643,75 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       else if (data.fileType === 'image' && data.fileUrl) imageSource = data.fileUrl;
       else { showToast('Document not ready', 'warning'); return; }
 
-      showToast('Asking AI to detect columns…', 'info');
+      showToast('Asking AI to read the table…', 'info');
       const cropImage = await cropRegionToDataUrl(imageSource, tableRecord.pageBbox);
+
+      // First: try AI vision direct read — it bypasses OCR entirely and reads
+      // cell text straight from the image. Far more robust on low-quality scans
+      // than Tesseract+heuristic, but costs one extra Gemini call per auto-fix.
+      try {
+        const visionResult = await extractTableWithAIVision(
+          { images: [cropImage], hintBbox: { x0: 0, y0: 0, x1: 1, y1: 1 } },
+          activeProvider.id,
+          activeConfig.selectedModel,
+          activeConfig.apiKey,
+        );
+        const newSelection = visionResult.selection;
+        const pageSize = tableRecord.pageSize;
+        const aiTable = materializeFromCells(newSelection, visionResult.cells, pageSize);
+
+        // Re-run bank mapping on the freshly-read text.
+        const headerSuggest = suggestBankMapping(aiTable);
+        const useHeader = headerSuggest.mapping && headerSuggest.confidence >= 0.65;
+        const contentSuggest = useHeader ? null : inferMappingFromContent(aiTable);
+        const finalMapping = useHeader ? headerSuggest.mapping : contentSuggest?.mapping ?? null;
+
+        const groupId = tableRecord.txnGroupId;
+        const existingGroup = groupId ? getTxnGroup(groupId) : null;
+        if (finalMapping && existingGroup) {
+          const remapped = materializedTableToTxnGroup(aiTable, finalMapping, {
+            nodeId: id,
+            label: existingGroup.label,
+            fileId: data.fileId ?? '',
+            pageRange: (existingGroup.origin.kind === 'bank' ? existingGroup.origin.pageRange : undefined) ?? [1, 1],
+          });
+          if (remapped.transactions.length > 0 && groupId) {
+            updateTxnGroup(groupId, {
+              label: existingGroup.label,
+              transactions: remapped.transactions,
+              origin: remapped.origin,
+            });
+          }
+        }
+
+        // Rebuild row regions from the new selection so highlight boxes match.
+        const newRows = buildRowRegions(
+          aiTable,
+          newSelection,
+          pageSize,
+          tableRecord.pageBbox,
+          tableRecord.pageNumber,
+          tableId,
+          id,
+          100,
+          data.regions.length,
+        );
+        const otherRegions = data.regions.filter((r) => r.tableSourceId !== tableId);
+        const nextTables = (data.tables ?? []).map((t) =>
+          t.id === tableId ? { ...t, selection: newSelection } : t,
+        );
+        updateNodeData(id, {
+          regions: [...otherRegions, ...newRows],
+          tables: nextTables,
+        });
+
+        showToast(`AI read ${aiTable.rows.length} row${aiTable.rows.length === 1 ? '' : 's'}`, 'success');
+        return;
+      } catch (err) {
+        console.warn('[auto-fix] AI vision read failed, falling back to OCR + column-detect path', err);
+      }
+
+      // Fallback: original OCR + column-detection path.
       let ocr = tableOcrCache.get(tableId);
       if (!ocr) ocr = await extractFullPageFromRegion(imageSource, tableRecord.pageBbox);
       tableOcrCache.set(tableId, ocr);
@@ -709,7 +776,21 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       });
       showToast(`Set ${finalColXs.length + 1} columns`, 'success');
     },
-    [data.tables, data.fileType, data.fileUrl, activeProvider, activeConfig, applyColumnSelection],
+    [
+      id,
+      data.tables,
+      data.fileType,
+      data.fileUrl,
+      data.fileId,
+      data.regions,
+      activeProvider,
+      activeConfig,
+      applyColumnSelection,
+      getTxnGroup,
+      updateTxnGroup,
+      updateNodeData,
+      showToast,
+    ],
   );
 
   const handleColumnDelete = useCallback(

@@ -31,7 +31,7 @@ interface ChatRequestBody {
   provider: string;
   model: string;
   apiKey: string;
-  mode: 'detect_fields' | 'detect_table' | 'freeform' | 'auto_connect' | 'summarise';
+  mode: 'detect_fields' | 'detect_table' | 'extract_table' | 'freeform' | 'auto_connect' | 'summarise';
   ocrText?: string;
   nodesContext?: Array<{
     nodeId: string;
@@ -184,6 +184,34 @@ Rules:
 - Do NOT include cell text. Only spatial separators.
 - Separators must be strictly inside bbox (not at the edges).
 - Exclude page margins, page numbers, and footers from bbox.
+
+Return ONLY the JSON object, no prose.`;
+
+const TABLE_EXTRACTION_SYSTEM_PROMPT = `You are a table extraction engine. You receive a document image (typically a bank statement table) and must read every cell directly from the image, using your visual understanding rather than relying on any provided OCR.
+
+Output strictly this JSON shape:
+{
+  "bbox": { "x0": number, "y0": number, "x1": number, "y1": number },
+  "rowYs": number[],
+  "colXs": number[],
+  "headerRowIndex": number | null,
+  "cells": string[][]
+}
+
+Coordinates are normalized 0-1 of the input image (x: left=0, right=1; y: top=0, bottom=1).
+- bbox: tight rectangle around the table.
+- colXs: between-column separators (N columns => N-1 entries), sorted.
+- rowYs: between-row separators (M rows => M-1 entries), sorted.
+- headerRowIndex: zero-based row index of the header row, or null.
+- cells: M rows x N columns of strings. Row order matches rowYs (top-to-bottom). Column order matches colXs (left-to-right). INCLUDE the header row at headerRowIndex.
+
+Rules:
+- Read the text from the IMAGE. The OCR may be garbled — trust your visual reading over any provided text.
+- Bank statements typically have columns: Date, Particulars/Description, Debit, Credit, Balance. Capture all of them.
+- Preserve numeric formatting (commas, decimals, signs, parens for negatives, trailing CR/DR).
+- Empty cells are "" (empty string), not null.
+- Every row must have exactly colXs.length+1 cells.
+- Exclude page margins, page numbers, footers from bbox.
 
 Return ONLY the JSON object, no prose.`;
 
@@ -356,6 +384,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const systemPromptMap: Record<string, string> = {
     detect_fields: FIELD_DETECTION_SYSTEM_PROMPT,
     detect_table: TABLE_DETECTION_SYSTEM_PROMPT,
+    extract_table: TABLE_EXTRACTION_SYSTEM_PROMPT,
     freeform: FREEFORM_SYSTEM_PROMPT,
     auto_connect: AUTO_CONNECT_SYSTEM_PROMPT,
     summarise: SUMMARISE_SYSTEM_PROMPT,
@@ -436,6 +465,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         messages: modelMessages,
         experimental_output: Output.object({ schema: tableSchema }),
         maxOutputTokens: 4096,
+      });
+      return res.status(200).json({ content: JSON.stringify(out.experimental_output), toolCalls: undefined });
+    }
+
+    // Structured output for full table extraction (layout + cell text from vision)
+    if (mode === 'extract_table') {
+      const extractSchema = z.object({
+        bbox: z.object({ x0: z.number(), y0: z.number(), x1: z.number(), y1: z.number() }),
+        rowYs: z.array(z.number()),
+        colXs: z.array(z.number()),
+        headerRowIndex: z.number().nullable().optional(),
+        cells: z.array(z.array(z.string())),
+      });
+      const out = await generateText({
+        model: resolvedModel,
+        system,
+        messages: modelMessages,
+        experimental_output: Output.object({ schema: extractSchema }),
+        maxOutputTokens: 16384,
       });
       return res.status(200).json({ content: JSON.stringify(out.experimental_output), toolCalls: undefined });
     }

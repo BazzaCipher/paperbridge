@@ -617,11 +617,13 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       else { showToast('Document not ready', 'warning'); return; }
 
       showToast('Asking AI to detect columns…', 'info');
+      const cropImage = await cropRegionToDataUrl(imageSource, tableRecord.pageBbox);
+      let ocr = tableOcrCache.get(tableId);
+      if (!ocr) ocr = await extractFullPageFromRegion(imageSource, tableRecord.pageBbox);
+      tableOcrCache.set(tableId, ocr);
+
+      let detected: TableSelection | null = null;
       try {
-        const cropImage = await cropRegionToDataUrl(imageSource, tableRecord.pageBbox);
-        let ocr = tableOcrCache.get(tableId);
-        if (!ocr) ocr = await extractFullPageFromRegion(imageSource, tableRecord.pageBbox);
-        tableOcrCache.set(tableId, ocr);
         console.log('[auto-fix] sending', {
           provider: activeProvider.id,
           model: activeConfig.selectedModel,
@@ -629,7 +631,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           imageBytes: cropImage.base64.length,
           currentColXs: tableRecord.selection.colXs,
         });
-        const detected = await detectTableWithAI(
+        detected = await detectTableWithAI(
           {
             images: [cropImage],
             ocrWords: ocr.words,
@@ -642,34 +644,43 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           activeConfig.apiKey,
         );
         console.log('[auto-fix] response', detected);
-        if (!Array.isArray(detected.colXs) || detected.colXs.length === 0) {
-          showToast('AI returned no column separators', 'warning');
-          return;
-        }
-
-        // If AI under-segments, fall back to OCR word-cluster heuristic colXs.
-        let finalColXs = detected.colXs;
-        const heuristicBuilt = buildTableSelectionFromOcr(ocr);
-        if (
-          heuristicBuilt &&
-          heuristicBuilt.selection.colXs.length > finalColXs.length
-        ) {
-          finalColXs = heuristicBuilt.selection.colXs;
-          console.log('[auto-fix] using heuristic colXs', finalColXs);
-        }
-
-        applyColumnSelection(tableId, {
-          ...tableRecord.selection,
-          colXs: finalColXs,
-          rowYs: detected.rowYs.length ? detected.rowYs : tableRecord.selection.rowYs,
-          headerRowIndex: detected.headerRowIndex ?? tableRecord.selection.headerRowIndex,
-        });
-        showToast(`AI set ${finalColXs.length + 1} columns`, 'success');
       } catch (err) {
-        console.error('[auto-fix] failed', err);
-        const msg = err instanceof Error ? err.message : String(err);
-        showToast(`AI column detection failed: ${msg}`, 'error');
+        console.warn('[auto-fix] AI failed, will fall back to OCR heuristic', err);
       }
+
+      // Always compute heuristic; use it if AI failed or under-segmented.
+      const heuristicBuilt = buildTableSelectionFromOcr(ocr);
+      const aiCols = detected?.colXs?.length ?? 0;
+      const heuristicCols = heuristicBuilt?.selection.colXs.length ?? 0;
+
+      let finalColXs: number[];
+      let finalRowYs: number[];
+      let finalHeaderRowIndex: number | undefined;
+      if (heuristicCols > aiCols && heuristicBuilt) {
+        finalColXs = heuristicBuilt.selection.colXs;
+        finalRowYs = heuristicBuilt.selection.rowYs.length
+          ? heuristicBuilt.selection.rowYs
+          : detected?.rowYs.length
+            ? detected.rowYs
+            : tableRecord.selection.rowYs;
+        finalHeaderRowIndex = heuristicBuilt.selection.headerRowIndex ?? detected?.headerRowIndex ?? tableRecord.selection.headerRowIndex;
+        console.log('[auto-fix] using heuristic colXs', finalColXs);
+      } else if (detected && aiCols > 0) {
+        finalColXs = detected.colXs;
+        finalRowYs = detected.rowYs.length ? detected.rowYs : tableRecord.selection.rowYs;
+        finalHeaderRowIndex = detected.headerRowIndex ?? tableRecord.selection.headerRowIndex;
+      } else {
+        showToast('Could not detect columns from AI or OCR', 'error');
+        return;
+      }
+
+      applyColumnSelection(tableId, {
+        ...tableRecord.selection,
+        colXs: finalColXs,
+        rowYs: finalRowYs,
+        headerRowIndex: finalHeaderRowIndex,
+      });
+      showToast(`Set ${finalColXs.length + 1} columns`, 'success');
     },
     [data.tables, data.fileType, data.fileUrl, activeProvider, activeConfig, applyColumnSelection],
   );

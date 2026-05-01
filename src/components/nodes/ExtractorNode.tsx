@@ -311,14 +311,27 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           }
         }
 
+        const heuristicBuilt = buildTableSelectionFromOcr(ocr);
+
         if (!selection) {
-          const built = buildTableSelectionFromOcr(ocr);
-          if (!built) {
+          if (!heuristicBuilt) {
             showToast('Could not detect a table — kept selection as a box.', 'warning');
             handleRegionCreate(coordinates, page);
             return;
           }
-          selection = built.selection;
+          selection = heuristicBuilt.selection;
+        } else if (
+          heuristicBuilt &&
+          heuristicBuilt.selection.colXs.length > selection.colXs.length
+        ) {
+          // AI under-segmented columns (common on dense bank statements where
+          // numeric columns visually compress). Heuristic clusters word x-starts
+          // across all rows and produces stricter column boundaries — prefer it
+          // for colXs while keeping AI's bbox / rowYs / headerRowIndex.
+          selection = {
+            ...selection,
+            colXs: heuristicBuilt.selection.colXs,
+          };
         }
 
         const table = materializeTable(selection, ocr);
@@ -633,13 +646,25 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           showToast('AI returned no column separators', 'warning');
           return;
         }
+
+        // If AI under-segments, fall back to OCR word-cluster heuristic colXs.
+        let finalColXs = detected.colXs;
+        const heuristicBuilt = buildTableSelectionFromOcr(ocr);
+        if (
+          heuristicBuilt &&
+          heuristicBuilt.selection.colXs.length > finalColXs.length
+        ) {
+          finalColXs = heuristicBuilt.selection.colXs;
+          console.log('[auto-fix] using heuristic colXs', finalColXs);
+        }
+
         applyColumnSelection(tableId, {
           ...tableRecord.selection,
-          colXs: detected.colXs,
+          colXs: finalColXs,
           rowYs: detected.rowYs.length ? detected.rowYs : tableRecord.selection.rowYs,
           headerRowIndex: detected.headerRowIndex ?? tableRecord.selection.headerRowIndex,
         });
-        showToast(`AI set ${detected.colXs.length + 1} columns`, 'success');
+        showToast(`AI set ${finalColXs.length + 1} columns`, 'success');
       } catch (err) {
         console.error('[auto-fix] failed', err);
         const msg = err instanceof Error ? err.message : String(err);

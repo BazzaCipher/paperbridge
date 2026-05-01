@@ -14,8 +14,8 @@ export interface TxnGroupSlice {
 
   /** Insert a TxnGroup; returns the assigned id. */
   addTxnGroup: (group: TxnGroup, id?: string) => string;
-  /** Replace an existing TxnGroup (no-op if id is unknown). */
-  updateTxnGroup: (id: string, group: TxnGroup) => void;
+  /** Shallow-merge a patch onto an existing TxnGroup (no-op if id is unknown). */
+  updateTxnGroup: (id: string, patch: Partial<TxnGroup>) => void;
   /** Remove a TxnGroup by id. */
   removeTxnGroup: (id: string) => void;
   /** Read a TxnGroup by id. */
@@ -33,10 +33,11 @@ export const createTxnGroupSlice: StateCreator<TxnGroupSlice> = (set, get) => ({
     return groupId;
   },
 
-  updateTxnGroup: (id, group) => {
+  updateTxnGroup: (id, patch) => {
     const current = (get() as unknown as TxnGroupSlice).txnGroups;
-    if (!current[id]) return;
-    set({ txnGroups: { ...current, [id]: group } } as never);
+    const existing = current[id];
+    if (!existing) return;
+    set({ txnGroups: { ...current, [id]: { ...existing, ...patch, id: existing.id } } } as never);
   },
 
   removeTxnGroup: (id) => {

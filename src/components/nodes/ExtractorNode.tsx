@@ -6,12 +6,13 @@ import { DocumentViewer } from './file/DocumentViewer';
 import { RegionSelector } from './file/RegionSelector';
 import { HighlightOverlay } from './file/HighlightOverlay';
 import { RegionList } from './file/RegionList';
+import { TxnGroupList } from './file/TxnGroupList';
 import { TxnGroupHandle } from './base/TxnGroupHandle';
 import { FileNodePreview } from './file/FileNodePreview';
 import { DocumentModal } from './file/DocumentModal';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { FileDropZone } from '../ui/FileDropZone';
-import { extractTextFromRegion, extractFullPage, extractFullPageFromRegion, type FullPageOcrResult } from '../../core/extraction/ocrExtractor';
+import { extractTextFromRegion, extractFullPage, extractFullPageFromRegion, cropRegionToDataUrl, type FullPageOcrResult } from '../../core/extraction/ocrExtractor';
 import { detectFields, fieldOverlapsExisting } from '../../core/extraction/fieldDetector';
 import { buildTableSelectionFromOcr } from '../../core/extraction/tableParser';
 import { materializeTable, type TableSelection, type MaterializedTable } from '../../core/extraction/tableMaterializer';
@@ -142,7 +143,10 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
   const [isExtracting, setIsExtracting] = useState(false);
   const [isAutoDetecting, setIsAutoDetecting] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [selectionMode, setSelectionMode] = useState<'select' | 'box' | 'text' | 'table'>('box');
+  const [selectionMode, setSelectionMode] = useState<'select' | 'box' | 'text' | 'single' | 'table'>('box');
+  const [singleStep, setSingleStep] = useState<'date' | 'description' | 'amount' | null>(null);
+  const [txnDropdownOpen, setTxnDropdownOpen] = useState(false);
+  const [addingColumnFor, setAddingColumnFor] = useState<string | null>(null);
   const [isExtractingTable, setIsExtractingTable] = useState(false);
   const { activeProvider, activeConfig } = useAiSettings();
   const imageRef = useRef<HTMLImageElement | HTMLCanvasElement | null>(null);
@@ -238,7 +242,9 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     });
     if (!group) return;
 
-    if (persistedId && getTxnGroup(persistedId)) {
+    const existing = persistedId ? getTxnGroup(persistedId) : undefined;
+    if (existing?.edited) return;
+    if (persistedId && existing) {
       updateTxnGroup(persistedId, group);
     } else {
       const newId = addTxnGroup(group);
@@ -301,14 +307,15 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
   );
 
   const handleRegionCreate = useCallback(
-    (coordinates: RegionCoordinates, pageNumber?: number) => {
+    (coordinates: RegionCoordinates, pageNumber?: number, role?: 'amount' | 'date' | 'description') => {
       const newRegion = createRegionFromBox(
         coordinates,
         pageNumber ?? data.currentPage,
         data.regions.length
       );
-      updateNodeData(id, { regions: [...data.regions, newRegion] });
-      setSelectedRegionId(newRegion.id);
+      const region = role ? { ...newRegion, role } : newRegion;
+      updateNodeData(id, { regions: [...data.regions, region] });
+      setSelectedRegionId(region.id);
     },
     [id, data.regions, data.currentPage, updateNodeData]
   );
@@ -339,9 +346,10 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
 
         if (activeProvider && activeConfig?.apiKey) {
           try {
-            // Crop is already the table region — hint bbox covers full crop.
+            const cropImage = await cropRegionToDataUrl(imageSource, coordinates);
             selection = await detectTableWithAI(
               {
+                images: [cropImage],
                 ocrWords: ocr.words,
                 hintBbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
               },
@@ -557,15 +565,343 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     [data.regions, data.tables, rematerializeTable],
   );
 
+  const txnGroupIds = useMemo(() => {
+    const ids: string[] = [];
+    if (data.invoiceTxnGroupId) ids.push(data.invoiceTxnGroupId);
+    for (const t of data.tables ?? []) {
+      if (t.txnGroupId) ids.push(t.txnGroupId);
+    }
+    return ids;
+  }, [data.invoiceTxnGroupId, data.tables]);
+
+  const applyColumnSelection = useCallback(
+    (tableId: string, nextSelection: TableSelection) => {
+      const tableRecord = (data.tables ?? []).find((t) => t.id === tableId);
+      if (!tableRecord) return;
+      void rematerializeTable(tableId, nextSelection);
+
+      const groupId = tableRecord.txnGroupId;
+      if (!groupId) return;
+      const ocr = tableOcrCache.get(tableId);
+      const group = getTxnGroup(groupId);
+      if (!ocr || !group) return;
+      const table = materializeTable(nextSelection, ocr, tableRecord.pageSize);
+      const headerIdx = nextSelection.headerRowIndex;
+      const headers =
+        headerIdx !== undefined ? table.rows[headerIdx] : table.headers.length ? table.headers : table.rows[0]?.map((_, i) => `Column ${i + 1}`) ?? [];
+      const dataRows = table.rows.filter((_, i) => i !== headerIdx);
+      const transactions = group.transactions.map((t, i) => {
+        const row = dataRows[i];
+        if (!row) return t;
+        const raw: Record<string, string> = {};
+        headers.forEach((h, ci) => { raw[h || `Column ${ci + 1}`] = row[ci] ?? ''; });
+        return { ...t, raw };
+      });
+      updateTxnGroup(groupId, {
+        transactions,
+        origin: { ...group.origin, sourceHeaders: headers.map((h, i) => h || `Column ${i + 1}`) },
+      });
+    },
+    [data.tables, rematerializeTable, getTxnGroup, updateTxnGroup],
+  );
+
+  const handleColumnEdgeDrag = useCallback(
+    (tableId: string, colIndex: number, deltaX: number) => {
+      const tableRecord = (data.tables ?? []).find((t) => t.id === tableId);
+      if (!tableRecord) return;
+      const sel = tableRecord.selection;
+      if (colIndex < 0 || colIndex >= sel.colXs.length) return;
+      const dxNorm = deltaX / tableRecord.pageBbox.width;
+      const nextColXs = [...sel.colXs];
+      const lower = colIndex > 0 ? nextColXs[colIndex - 1] : sel.bbox.x0;
+      const upper = colIndex < nextColXs.length - 1 ? nextColXs[colIndex + 1] : sel.bbox.x1;
+      const minGap = 0.005;
+      const candidate = nextColXs[colIndex] + dxNorm;
+      nextColXs[colIndex] = Math.min(upper - minGap, Math.max(lower + minGap, candidate));
+      applyColumnSelection(tableId, { ...sel, colXs: nextColXs });
+    },
+    [data.tables, applyColumnSelection],
+  );
+
+  const handleColumnInsert = useCallback(
+    (tableId: string, normalizedX: number) => {
+      const tableRecord = (data.tables ?? []).find((t) => t.id === tableId);
+      if (!tableRecord) return;
+      const sel = tableRecord.selection;
+      const minGap = 0.005;
+      if (normalizedX <= sel.bbox.x0 + minGap || normalizedX >= sel.bbox.x1 - minGap) return;
+      if (sel.colXs.some((cx) => Math.abs(cx - normalizedX) < minGap)) return;
+      const nextColXs = [...sel.colXs, normalizedX].sort((a, b) => a - b);
+      applyColumnSelection(tableId, { ...sel, colXs: nextColXs });
+    },
+    [data.tables, applyColumnSelection],
+  );
+
+  const handleAutoFixColumns = useCallback(
+    async (tableId: string) => {
+      const tableRecord = (data.tables ?? []).find((t) => t.id === tableId);
+      if (!tableRecord) return;
+      if (!activeProvider || !activeConfig?.apiKey) {
+        showToast('Configure an AI provider in settings first', 'warning');
+        return;
+      }
+      let imageSource: HTMLImageElement | HTMLCanvasElement | string;
+      if (imageRef.current) imageSource = imageRef.current;
+      else if (data.fileType === 'image' && data.fileUrl) imageSource = data.fileUrl;
+      else { showToast('Document not ready', 'warning'); return; }
+
+      try {
+        const cropImage = await cropRegionToDataUrl(imageSource, tableRecord.pageBbox);
+        let ocr = tableOcrCache.get(tableId);
+        if (!ocr) ocr = await extractFullPageFromRegion(imageSource, tableRecord.pageBbox);
+        tableOcrCache.set(tableId, ocr);
+        const detected = await detectTableWithAI(
+          {
+            images: [cropImage],
+            ocrWords: ocr.words,
+            hintBbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
+          },
+          activeProvider.id,
+          activeConfig.selectedModel,
+          activeConfig.apiKey,
+        );
+        applyColumnSelection(tableId, {
+          ...tableRecord.selection,
+          colXs: detected.colXs,
+          rowYs: detected.rowYs.length ? detected.rowYs : tableRecord.selection.rowYs,
+          headerRowIndex: detected.headerRowIndex ?? tableRecord.selection.headerRowIndex,
+        });
+        showToast('Columns updated by AI', 'success');
+      } catch (err) {
+        console.warn('Auto-fix columns failed:', err);
+        showToast('AI column detection failed', 'error');
+      }
+    },
+    [data.tables, data.fileType, data.fileUrl, activeProvider, activeConfig, applyColumnSelection],
+  );
+
+  const handleColumnDelete = useCallback(
+    (tableId: string, colIndex: number) => {
+      const tableRecord = (data.tables ?? []).find((t) => t.id === tableId);
+      if (!tableRecord) return;
+      const sel = tableRecord.selection;
+      if (colIndex < 0 || colIndex >= sel.colXs.length) return;
+      const nextColXs = sel.colXs.filter((_, i) => i !== colIndex);
+      applyColumnSelection(tableId, { ...sel, colXs: nextColXs });
+    },
+    [data.tables, applyColumnSelection],
+  );
+
+  const handleAddColumn = useCallback(
+    async (coordinates: RegionCoordinates) => {
+      const tableId = addingColumnFor;
+      if (!tableId) return;
+      const tableRecord = (data.tables ?? []).find((t) => t.id === tableId);
+      if (!tableRecord || !tableRecord.txnGroupId) {
+        setAddingColumnFor(null);
+        return;
+      }
+      const groupId = tableRecord.txnGroupId;
+      const group = getTxnGroup(groupId);
+      if (!group) {
+        setAddingColumnFor(null);
+        return;
+      }
+
+      let imageSource: HTMLImageElement | HTMLCanvasElement | string;
+      if (imageRef.current) imageSource = imageRef.current;
+      else if (data.fileType === 'image' && data.fileUrl) imageSource = data.fileUrl;
+      else {
+        showToast('PDF not ready. Please wait and try again.', 'warning');
+        return;
+      }
+
+      try {
+        const ocr = await extractFullPageFromRegion(imageSource, coordinates);
+        const sel = tableRecord.selection;
+        const tableBbox = tableRecord.pageBbox;
+        const rowEdges = [sel.bbox.y0, ...sel.rowYs, sel.bbox.y1];
+        const numRows = rowEdges.length - 1;
+
+        // Map a y in OCR-strip pixel space → normalized y inside the table's pageBbox.
+        const stripYToTableNorm = (yPx: number): number => {
+          const yInPage = coordinates.y + (yPx / ocr.imageHeight) * coordinates.height;
+          return (yInPage - tableBbox.y) / tableBbox.height;
+        };
+
+        const cellWords: string[][] = Array.from({ length: numRows }, () => []);
+        for (const w of ocr.words) {
+          const cy = (w.bbox.y0 + w.bbox.y1) / 2;
+          const yNorm = stripYToTableNorm(cy);
+          if (yNorm < sel.bbox.y0 || yNorm > sel.bbox.y1) continue;
+          let row = numRows - 1;
+          for (let i = 0; i < rowEdges.length - 1; i++) {
+            if (yNorm < rowEdges[i + 1]) { row = i; break; }
+          }
+          cellWords[row].push(w.text);
+        }
+        const cellTexts = cellWords.map((ws) => ws.join(' ').trim());
+
+        const headerIdx = sel.headerRowIndex;
+        let headerName =
+          headerIdx !== undefined && cellTexts[headerIdx] ? cellTexts[headerIdx] : '';
+        const promptDefault = headerName || `Column ${(group.origin.sourceHeaders?.length ?? 0) + 1}`;
+        const userName = window.prompt('Column name?', promptDefault);
+        if (!userName || !userName.trim()) {
+          setAddingColumnFor(null);
+          return;
+        }
+        headerName = userName.trim();
+
+        // Drop the header row from data cells if present, mirroring buildRowRegions.
+        const dataCells: string[] = [];
+        for (let i = 0; i < cellTexts.length; i++) {
+          if (i === headerIdx) continue;
+          dataCells.push(cellTexts[i]);
+        }
+
+        const transactions = group.transactions.map((t, i) => ({
+          ...t,
+          raw: { ...(t.raw ?? {}), [headerName]: dataCells[i] ?? '' },
+        }));
+        const sourceHeaders = [...(group.origin.sourceHeaders ?? []), headerName];
+        updateTxnGroup(groupId, {
+          transactions,
+          origin: { ...group.origin, sourceHeaders },
+        });
+
+        showToast(`Added column "${headerName}"`, 'success');
+      } catch (err) {
+        console.error('Add column failed:', err);
+        showToast('Could not OCR the column strip.', 'error');
+      } finally {
+        setAddingColumnFor(null);
+      }
+    },
+    [addingColumnFor, data.tables, data.fileType, data.fileUrl, getTxnGroup, updateTxnGroup, showToast],
+  );
+
+  const handleSingleStepCreate = useCallback(
+    async (coordinates: RegionCoordinates, pageNumber?: number) => {
+      const role = singleStep ?? 'date';
+      const page = pageNumber ?? data.currentPage;
+      const baseRegion = createRegionFromBox(coordinates, page, data.regions.length);
+      const region: ExtractedRegion = {
+        ...baseRegion,
+        role,
+        label: role === 'date' ? 'Date' : role === 'description' ? 'Description' : 'Amount',
+      };
+      updateNodeData(id, { regions: [...data.regions, region] });
+      setSelectedRegionId(region.id);
+
+      if (data.fileUrl) {
+        try {
+          const result = await extractTextFromRegion(data.fileUrl, coordinates);
+          updateNodeData(id, {
+            regions: [
+              ...data.regions,
+              {
+                ...region,
+                extractedData: {
+                  ...result.dataValue,
+                  source: {
+                    nodeId: id,
+                    regionId: region.id,
+                    pageNumber: page,
+                    coordinates,
+                    extractionMethod: 'ocr' as const,
+                    confidence: result.confidence,
+                  },
+                },
+              },
+            ],
+          });
+        } catch (err) {
+          console.warn('Single-mode OCR failed:', err);
+        }
+      }
+
+      const next = role === 'date' ? 'description' : role === 'description' ? 'amount' : null;
+      setSingleStep(next);
+      if (next === null) {
+        showToast('Single transaction captured', 'success');
+        setSelectionMode('select');
+      }
+    },
+    [singleStep, data.currentPage, data.regions, data.fileUrl, id, updateNodeData],
+  );
+
   const handleBoxOrTableCreate = useCallback(
     (coordinates: RegionCoordinates, pageNumber?: number) => {
-      if (selectionMode === 'table') {
+      if (addingColumnFor) {
+        void handleAddColumn(coordinates);
+      } else if (selectionMode === 'table') {
         void handleTableExtract(coordinates, pageNumber);
+      } else if (selectionMode === 'single') {
+        void handleSingleStepCreate(coordinates, pageNumber);
       } else {
         handleRegionCreate(coordinates, pageNumber);
       }
     },
-    [selectionMode, handleTableExtract, handleRegionCreate],
+    [addingColumnFor, handleAddColumn, selectionMode, handleTableExtract, handleRegionCreate, handleSingleStepCreate],
+  );
+
+  const handleTxnGroupAddColumn = useCallback(
+    (groupId: string) => {
+      const table = (data.tables ?? []).find((t) => t.txnGroupId === groupId);
+      if (!table) return;
+      setAddingColumnFor(table.id);
+    },
+    [data.tables],
+  );
+
+  const handleTxnGroupTxnEdit = useCallback(
+    (
+      groupId: string,
+      txnId: string,
+      patch: { date?: string; description?: string; amount?: number; raw?: Record<string, string> },
+    ) => {
+      const group = getTxnGroup(groupId);
+      if (!group) return;
+      const transactions = group.transactions.map((t) =>
+        t.id === txnId
+          ? { ...t, ...patch, raw: patch.raw ? { ...(t.raw ?? {}), ...patch.raw } : t.raw }
+          : t,
+      );
+      updateTxnGroup(groupId, { transactions, edited: true });
+    },
+    [getTxnGroup, updateTxnGroup],
+  );
+
+  const handleTxnGroupRename = useCallback(
+    (groupId: string, label: string) => {
+      updateTxnGroup(groupId, { label });
+    },
+    [updateTxnGroup],
+  );
+
+  const handleTxnGroupDelete = useCallback(
+    (groupId: string) => {
+      const group = getTxnGroup(groupId);
+      if (!group) return;
+      if (group.origin.kind === 'invoice') {
+        // Clear role tags on standalone regions; the invoice useEffect cleans up the group.
+        updateNodeData(id, {
+          regions: data.regions.map((r) =>
+            r.tableSourceId ? r : { ...r, role: undefined },
+          ),
+        });
+      } else if (group.origin.kind === 'bank') {
+        const table = (data.tables ?? []).find((t) => t.txnGroupId === groupId);
+        if (!table) return;
+        updateNodeData(id, {
+          regions: data.regions.filter((r) => r.tableSourceId !== table.id),
+          tables: (data.tables ?? []).filter((t) => t.id !== table.id),
+        });
+        removeTxnGroup(groupId);
+      }
+    },
+    [id, data.regions, data.tables, updateNodeData, getTxnGroup, removeTxnGroup],
   );
 
   const handleTextSelect = useCallback(
@@ -832,6 +1168,13 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     }
   }, [id, data.fileUrl, data.fileType, data.regions, data.currentPage, updateNodeData, showToast]);
 
+  useEffect(() => {
+    if (!addingColumnFor) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setAddingColumnFor(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [addingColumnFor]);
+
   // Scroll to selected region once when selection changes
   useEffect(() => {
     if (!isModalOpen || !selectedRegionId || !viewerAreaRef.current) {
@@ -1046,27 +1389,57 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                 </svg>
                 Box
               </button>
-              <button
-                onClick={() => setSelectionMode('table')}
-                disabled={isExtractingTable}
-                className={`px-3 py-1.5 text-xs rounded-md transition-colors flex items-center gap-1.5 ${
-                  selectionMode === 'table'
-                    ? 'bg-copper-500 text-white shadow-sm'
-                    : 'bg-paper-100 text-bridge-600 hover:bg-paper-200'
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {isExtractingTable ? (
-                  <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              <div className="relative">
+                <button
+                  onClick={() => setTxnDropdownOpen((v) => !v)}
+                  disabled={isExtractingTable}
+                  className={`px-3 py-1.5 text-xs rounded-md transition-colors flex items-center gap-1.5 ${
+                    selectionMode === 'single' || selectionMode === 'table'
+                      ? 'bg-copper-500 text-white shadow-sm'
+                      : 'bg-paper-100 text-bridge-600 hover:bg-paper-200'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {isExtractingTable ? (
+                    <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 1v3h4V5H5zm6 0v3h4V5h-4zM5 10v3h4v-3H5zm6 0v3h4v-3h-4zM5 15v1h4v-1H5zm6 0v1h4v-1h-4z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                  Txns
+                  {selectionMode === 'single' && (
+                    <span className="opacity-80">: Single{singleStep ? ` → ${singleStep}` : ''}</span>
+                  )}
+                  {selectionMode === 'table' && <span className="opacity-80">: Table</span>}
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
                   </svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 1v3h4V5H5zm6 0v3h4V5h-4zM5 10v3h4v-3H5zm6 0v3h4v-3h-4zM5 15v1h4v-1H5zm6 0v1h4v-1h-4z" clipRule="evenodd" />
-                  </svg>
+                </button>
+                {txnDropdownOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setTxnDropdownOpen(false)} />
+                    <div className="absolute top-full left-0 mt-1 w-44 bg-white border border-paper-200 rounded-md shadow-lg z-20">
+                      <button
+                        onClick={() => { setSelectionMode('single'); setSingleStep('date'); setTxnDropdownOpen(false); }}
+                        className={`w-full px-3 py-2 text-xs text-left hover:bg-paper-100 ${selectionMode === 'single' ? 'text-copper-600 font-medium' : 'text-bridge-700'}`}
+                      >
+                        <div>Single select</div>
+                        <div className="text-[10px] text-bridge-400">Tag a region as date / desc / amount</div>
+                      </button>
+                      <button
+                        onClick={() => { setSelectionMode('table'); setTxnDropdownOpen(false); }}
+                        className={`w-full px-3 py-2 text-xs text-left hover:bg-paper-100 border-t border-paper-100 ${selectionMode === 'table' ? 'text-copper-600 font-medium' : 'text-bridge-700'}`}
+                      >
+                        <div>Table</div>
+                        <div className="text-[10px] text-bridge-400">Detect rows from a table region</div>
+                      </button>
+                    </div>
+                  </>
                 )}
-                Table
-              </button>
+              </div>
               {data.fileType === 'pdf' && (
                 <button
                   onClick={() => setSelectionMode('text')}
@@ -1112,29 +1485,59 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           </>
         }
         panel={
-          <CollapsiblePanel title="Fields" badge={data.regions.length} defaultOpen={true} side="right">
-            <RegionList
-              regions={data.regions}
-              selectedRegionId={selectedRegionId}
-              onRegionSelect={handleRegionSelect}
-              onRegionDelete={handleRegionDelete}
-              onRegionLabelChange={handleRegionLabelChange}
-              onRegionDataTypeChange={handleRegionDataTypeChange}
-              onRegionRoleChange={handleRegionRoleChange}
-              onValueChange={handleValueChange}
-              onExtract={handleExtract}
-              isExtracting={isExtracting}
-              showOcrButton={false}
-            />
-          </CollapsiblePanel>
+          <div className="flex flex-col border-l border-paper-200 w-72 h-full min-h-0">
+            <CollapsiblePanel
+              title="Fields"
+              badge={data.regions.length}
+              defaultOpen={true}
+              orientation="vertical"
+            >
+              <RegionList
+                regions={data.regions}
+                selectedRegionId={selectedRegionId}
+                onRegionSelect={handleRegionSelect}
+                onRegionDelete={handleRegionDelete}
+                onRegionLabelChange={handleRegionLabelChange}
+                onRegionDataTypeChange={handleRegionDataTypeChange}
+                onRegionRoleChange={handleRegionRoleChange}
+                onValueChange={handleValueChange}
+                onExtract={handleExtract}
+                isExtracting={isExtracting}
+                showOcrButton={false}
+              />
+            </CollapsiblePanel>
+            <CollapsiblePanel
+              title="Transaction Groups"
+              badge={txnGroupIds.length}
+              defaultOpen={true}
+              orientation="vertical"
+              className="border-t border-paper-200"
+            >
+              <TxnGroupList
+                groupIds={txnGroupIds}
+                onRename={handleTxnGroupRename}
+                onDelete={handleTxnGroupDelete}
+                onTxnEdit={handleTxnGroupTxnEdit}
+                onAddColumn={handleTxnGroupAddColumn}
+                onAutoFixColumns={(groupId) => {
+                  const t = (data.tables ?? []).find((tt) => tt.txnGroupId === groupId);
+                  if (t) void handleAutoFixColumns(t.id);
+                }}
+              />
+            </CollapsiblePanel>
+          </div>
         }
         footer={
           <div className="px-4 py-2 bg-paper-100 border-t border-paper-200 text-xs text-bridge-500 flex items-center justify-between">
             <span>
-              {selectionMode === 'select'
+              {addingColumnFor
+                ? 'Draw a vertical strip aligned with table rows to add a new column. Esc to cancel.'
+                : selectionMode === 'select'
                 ? 'Click on a highlight to select it.'
                 : selectionMode === 'box'
                 ? 'Draw a box to create a field.'
+                : selectionMode === 'single'
+                ? 'Draw a box around a value (defaults to amount; change role in the field).'
                 : selectionMode === 'table'
                 ? 'Draw a box around a table to extract its rows.'
                 : 'Select text directly to create a field with that value.'}
@@ -1175,11 +1578,14 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                   currentPage={data.currentPage}
                   selectedRegionId={selectedRegionId}
                   onRegionSelect={handleRegionSelect}
-                  interactive={selectionMode === 'select' || selectionMode === 'box' || selectionMode === 'table'}
+                  interactive={selectionMode === 'select' || selectionMode === 'box' || selectionMode === 'table' || selectionMode === 'single' || !!addingColumnFor}
                   nodeId={id}
                   scrollMode={true}
                   pageOffsets={pageOffsets}
                   onRowEdgeDrag={handleRowEdgeDrag}
+                  onColumnEdgeDrag={handleColumnEdgeDrag}
+                  onColumnInsert={handleColumnInsert}
+                  onColumnDelete={handleColumnDelete}
                   tables={data.tables}
                 />
               )}
@@ -1189,7 +1595,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                 transforms don't affect layout, so an inset-0 sibling would
                 only catch clicks on the un-zoomed footprint and overflowed
                 drags would fall through to the modal's scroll container. */}
-            {data.fileUrl && (selectionMode === 'box' || selectionMode === 'table') && (
+            {data.fileUrl && (selectionMode === 'box' || selectionMode === 'table' || selectionMode === 'single' || !!addingColumnFor) && (
               <RegionSelector
                 onRegionCreate={handleBoxOrTableCreate}
                 documentRef={documentRef}

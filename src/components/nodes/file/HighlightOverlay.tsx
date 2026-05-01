@@ -5,6 +5,64 @@ import { getColorForType } from '../../../utils/colors';
 import { useCanvasStore } from '../../../store/canvasStore';
 import { Highlightable } from '../../../types/categories';
 
+function ColumnSeparatorHandle({
+  leftPx,
+  color,
+  onDrag,
+  onDelete,
+}: {
+  leftPx: number;
+  color: string;
+  onDrag: (deltaX: number) => void;
+  onDelete?: () => void;
+}) {
+  const startXRef = useRef<number | null>(null);
+  const lastEmittedRef = useRef<number>(0);
+
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    startXRef.current = e.clientX;
+    lastEmittedRef.current = 0;
+  }, []);
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (startXRef.current === null) return;
+      const total = e.clientX - startXRef.current;
+      const delta = total - lastEmittedRef.current;
+      if (Math.abs(delta) < 1) return;
+      lastEmittedRef.current = total;
+      onDrag(delta);
+    },
+    [onDrag],
+  );
+
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (startXRef.current === null) return;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    startXRef.current = null;
+    lastEmittedRef.current = 0;
+  }, []);
+
+  return (
+    <div
+      className="absolute top-0 bottom-0 cursor-ew-resize pointer-events-auto"
+      style={{ left: leftPx - 3, width: 6, backgroundColor: color, opacity: 0.5 }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (onDelete && (e.altKey || e.metaKey)) onDelete();
+      }}
+      title={onDelete ? 'Drag to move, Alt+click to remove' : undefined}
+    />
+  );
+}
+
 function RowEdgeHandle({
   edge,
   color,
@@ -75,6 +133,12 @@ interface HighlightOverlayProps {
   onRowEdgeDrag?: (regionId: string, edge: 'top' | 'bottom', deltaY: number) => void;
   /** Table records — drawn as a single outline per group instead of per-row boxes. */
   tables?: TableRecord[];
+  /** When set, table outlines get draggable column separators. */
+  onColumnEdgeDrag?: (tableId: string, colIndex: number, deltaX: number) => void;
+  /** Double-click inside a table outline inserts a new column at the click X. */
+  onColumnInsert?: (tableId: string, normalizedX: number) => void;
+  /** Alt+click on a column separator removes it. */
+  onColumnDelete?: (tableId: string, colIndex: number) => void;
 }
 
 export function HighlightOverlay({
@@ -88,6 +152,9 @@ export function HighlightOverlay({
   pageOffsets,
   onRowEdgeDrag,
   tables = [],
+  onColumnEdgeDrag,
+  onColumnInsert,
+  onColumnDelete,
 }: HighlightOverlayProps) {
   // Check if a region is externally highlighted
   const highlightedHandle = useCanvasStore(state => state.highlightedHandle);
@@ -128,7 +195,7 @@ export function HighlightOverlay({
         <div
           key={table.id}
           data-table-id={table.id}
-          className="absolute"
+          className={`absolute ${onColumnInsert ? 'pointer-events-auto' : ''}`}
           style={{
             left: table.pageBbox.x,
             top: getPageOffset(table.pageNumber) + table.pageBbox.y,
@@ -138,6 +205,12 @@ export function HighlightOverlay({
             backgroundColor: 'rgb(16 185 129 / 0.06)',
             borderRadius: 2,
           }}
+          onDoubleClick={onColumnInsert ? (e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const localX = e.clientX - rect.left;
+            const normalized = table.pageBbox.width > 0 ? localX / table.pageBbox.width : 0;
+            onColumnInsert(table.id, normalized);
+          } : undefined}
         >
           <div
             className="absolute -top-5 left-0 px-1.5 py-0.5 text-[10px] text-white rounded-t whitespace-nowrap font-semibold uppercase tracking-wide"
@@ -145,6 +218,15 @@ export function HighlightOverlay({
           >
             TxnGroup
           </div>
+          {onColumnEdgeDrag && table.selection.colXs.map((cx, i) => (
+            <ColumnSeparatorHandle
+              key={i}
+              leftPx={cx * table.pageBbox.width}
+              color="rgb(16 185 129)"
+              onDrag={(dx) => onColumnEdgeDrag(table.id, i, dx)}
+              onDelete={onColumnDelete ? () => onColumnDelete(table.id, i) : undefined}
+            />
+          ))}
         </div>
       ))}
 

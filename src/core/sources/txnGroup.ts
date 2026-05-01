@@ -49,6 +49,8 @@ export interface TxnGroup {
     pageRange?: [number, number];
   };
   meta?: BankStatementMeta;
+  /** True once a user has manually edited transactions; rebuild effects must skip. */
+  edited?: boolean;
 }
 
 export interface BankColumnMapping {

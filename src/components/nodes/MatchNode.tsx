@@ -104,10 +104,15 @@ export function MatchNode({ id, data, selected }: NodeProps<MatchNodeType>) {
       }
     >
       <div className="relative">
-        {/* Top input: source A */}
-        <TxnGroupHandle name="source-a" handleType="target" handlePosition={Position.Top}>
+        {/* Inputs: source A and source B, stacked on the left */}
+        <TxnGroupHandle name="source-a" handleType="target" handlePosition={Position.Left}>
           <div className="text-xs text-bridge-500 truncate flex-1">
-            {groupA ? `A: ${groupA.label} (${groupA.transactions.length})` : <span className="text-bridge-400">Connect TxnGroup A on top</span>}
+            {groupA ? `A: ${groupA.label} (${groupA.transactions.length})` : <span className="text-bridge-400">Connect TxnGroup A</span>}
+          </div>
+        </TxnGroupHandle>
+        <TxnGroupHandle name="source-b" handleType="target" handlePosition={Position.Left}>
+          <div className="text-xs text-bridge-500 truncate flex-1">
+            {groupB ? `B: ${groupB.label} (${groupB.transactions.length})` : <span className="text-bridge-400">Connect TxnGroup B</span>}
           </div>
         </TxnGroupHandle>
 
@@ -139,13 +144,6 @@ export function MatchNode({ id, data, selected }: NodeProps<MatchNodeType>) {
         </TxnGroupHandle>
         <TxnGroupHandle name="unmatched-b" handleType="source" handlePosition={Position.Right}>
           <div className="text-[10px] text-bridge-400 flex-1 text-right pr-2">unmatched B</div>
-        </TxnGroupHandle>
-
-        {/* Bottom input: source B */}
-        <TxnGroupHandle name="source-b" handleType="target" handlePosition={Position.Bottom}>
-          <div className="text-xs text-bridge-500 truncate flex-1">
-            {groupB ? `B: ${groupB.label} (${groupB.transactions.length})` : <span className="text-bridge-400">Connect TxnGroup B on bottom</span>}
-          </div>
         </TxnGroupHandle>
       </div>
 

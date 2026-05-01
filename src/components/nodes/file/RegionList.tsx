@@ -135,12 +135,12 @@ export function RegionList({
           } ${isExternal ? 'bg-copper-400/20 ring-2 ring-copper-400' : ''}`}
         >
           <div
-            className="flex items-center gap-2 flex-1 min-w-0 py-0.5"
+            className="flex items-center gap-2 flex-1 min-w-0 self-stretch"
             onClick={() => onRegionSelect(region.id)}
           >
             <div className={`w-2 h-2 rounded-full flex-shrink-0 ${typeColor}`} />
             {opts?.roleLed && roleLabel ? (
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 w-12 flex-shrink-0">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-bridge-500 w-12 flex-shrink-0">
                 {roleLabel}
               </span>
             ) : (
@@ -160,13 +160,10 @@ export function RegionList({
 
     return (
       <div className="divide-y divide-paper-100">
-        <div className="border-l-2 border-emerald-400">
-          <div className="px-3 py-1 bg-emerald-50/60 flex items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+        <div>
+          <div className="px-3 py-1 bg-paper-50">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-bridge-500">
               Transaction
-            </span>
-            <span className="text-[10px] text-bridge-400">
-              feeds txngroup handle
             </span>
           </div>
           {txnRegions.length > 0 ? (

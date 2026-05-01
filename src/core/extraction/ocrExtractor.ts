@@ -217,6 +217,40 @@ export async function extractFullPageFromRegion(
   return extractFullPage(canvas);
 }
 
+/**
+ * Crop a region of the source image to a base64 PNG (no OCR).
+ * Returns the same crop that extractFullPageFromRegion would feed to OCR.
+ */
+export async function cropRegionToDataUrl(
+  imageSource: HTMLImageElement | HTMLCanvasElement | string,
+  region: RegionCoordinates,
+): Promise<{ mimeType: string; base64: string }> {
+  let img: HTMLImageElement | HTMLCanvasElement;
+  if (typeof imageSource === 'string') {
+    img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Failed to load image for crop'));
+      image.src = imageSource;
+    });
+  } else {
+    img = imageSource;
+  }
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Failed to get canvas context');
+  const src = scaleRegionToNatural(img, region);
+  canvas.width = Math.max(1, Math.round(src.width));
+  canvas.height = Math.max(1, Math.round(src.height));
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, src.x, src.y, src.width, src.height, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/png');
+  const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+  return { mimeType: 'image/png', base64 };
+}
+
 export async function extractTextFromPdfPage(
   pdfCanvas: HTMLCanvasElement,
   region: RegionCoordinates

@@ -136,7 +136,7 @@ interface CanvasStore {
   // TxnGroups
   txnGroups: Record<string, TxnGroup>;
   addTxnGroup: (group: TxnGroup, id?: string) => string;
-  updateTxnGroup: (id: string, group: TxnGroup) => void;
+  updateTxnGroup: (id: string, patch: Partial<TxnGroup>) => void;
   removeTxnGroup: (id: string) => void;
   getTxnGroup: (id: string) => TxnGroup | undefined;
 }

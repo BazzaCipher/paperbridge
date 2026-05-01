@@ -1,24 +1,5 @@
 import type { ExtractedRegion, RegionCoordinates, TextRange, SimpleDataType } from '../types';
-import type { FieldType } from '../types/regions';
 import type { AiDetectedField } from '../types/ai';
-
-/**
- * Map a detected field type to a reconciliation role. Returns undefined for
- * field types that aren't relevant to TxnGroup emission.
- */
-export function roleFromFieldType(fieldType: string | undefined): ExtractedRegion['role'] | undefined {
-  switch (fieldType as FieldType) {
-    case 'total_amount':
-    case 'currency_amount':
-      return 'amount';
-    case 'date':
-      return 'date';
-    case 'name':
-      return 'description';
-    default:
-      return undefined;
-  }
-}
 import { getColorForType } from './colors';
 import { generateId } from './id';
 import { detectDataType, parseDateString } from './formatting';
@@ -99,6 +80,5 @@ export function createRegionFromDetectedField(
     dataType,
     color: getColorForType(dataType).border,
     extractedData: { type: dataType, value: field.text },
-    role: roleFromFieldType(field.fieldType),
   };
 }

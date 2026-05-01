@@ -64,12 +64,6 @@ export interface ExtractedRegion {
   tableRowIndex?: number;
   /** Per-column cell values for user-defined columns (reconciliation). */
   cells?: Record<string, string>;
-  /**
-   * Reconciliation role tag. When at least one region on a node has
-   * `role: 'amount'`, the ExtractorNode emits a `txngroup:` handle with a
-   * single-Transaction TxnGroup built from the role-tagged regions.
-   */
-  role?: 'amount' | 'date' | 'description';
 }
 
 /** User-defined column on an ExtractorNode ledger table */

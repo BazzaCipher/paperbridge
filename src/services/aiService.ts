@@ -241,6 +241,9 @@ export async function detectFieldsWithAI(
 export interface DetectTableOptions {
   images?: Array<{ mimeType: string; base64: string }>;
   ocrWords?: OcrWord[];
+  /** Pixel dimensions of the OCR crop. Used to normalize word boxes correctly. */
+  imageWidth?: number;
+  imageHeight?: number;
   /** Optional bbox hint in normalized 0-1 page coords (user-drawn region). */
   hintBbox?: { x0: number; y0: number; x1: number; y1: number };
 }
@@ -291,26 +294,27 @@ export async function detectTableWithAI(
   model: string,
   apiKey: string,
 ): Promise<TableSelection> {
-  const { images, ocrWords, hintBbox } = options;
+  const { images, ocrWords, hintBbox, imageWidth, imageHeight } = options;
 
-  let userContent = 'Detect the spatial layout of the table in this image. The image IS the table region — return colXs and rowYs as fractions (0-1) of THIS image. Return ONLY the JSON object with bbox, rowYs, colXs, headerRowIndex. Do NOT include cell text.';
+  let userContent = 'Detect the spatial layout of the table in this image. The image IS the table region — return colXs and rowYs as fractions (0-1) of THIS image (its full pixel width/height, edge to edge). Return ONLY the JSON object with bbox, rowYs, colXs, headerRowIndex. Do NOT include cell text.\n\nIMPORTANT: Bank-statement tables typically have a leading DATE column even though dates are short and visually compact. Make sure to put a colXs entry between the date column and the description column. Aim to capture ALL semantic columns (date, description/details, debit/credit/amount, balance, ref). When in doubt, prefer more columns over fewer.';
   if (hintBbox) {
     userContent += `\n\nUser-drawn region (normalized 0-1 of page): ${JSON.stringify(hintBbox)}. Constrain bbox to this region.`;
   }
   if (ocrWords?.length) {
-    // Normalize OCR boxes to 0-1 of the crop using the first image's intrinsic dims if available,
-    // otherwise pass pixels and tell the model so. Words are already in crop-pixel space.
-    const maxX = ocrWords.reduce((m, w) => Math.max(m, w.bbox.x1), 0) || 1;
-    const maxY = ocrWords.reduce((m, w) => Math.max(m, w.bbox.y1), 0) || 1;
+    // Normalize against the actual image dims so the model's output matches the image's
+    // edge-to-edge coordinate space. Falling back to max-of-words causes a right-drift
+    // (since words always end before the right margin).
+    const W = imageWidth && imageWidth > 0 ? imageWidth : ocrWords.reduce((m, w) => Math.max(m, w.bbox.x1), 0) || 1;
+    const H = imageHeight && imageHeight > 0 ? imageHeight : ocrWords.reduce((m, w) => Math.max(m, w.bbox.y1), 0) || 1;
     const ocrData = ocrWords.map((w) => ({
       b: [
-        +(w.bbox.x0 / maxX).toFixed(4),
-        +(w.bbox.y0 / maxY).toFixed(4),
-        +(w.bbox.x1 / maxX).toFixed(4),
-        +(w.bbox.y1 / maxY).toFixed(4),
+        +(w.bbox.x0 / W).toFixed(4),
+        +(w.bbox.y0 / H).toFixed(4),
+        +(w.bbox.x1 / W).toFixed(4),
+        +(w.bbox.y1 / H).toFixed(4),
       ],
     }));
-    userContent += `\n\nOCR word boxes [x0,y0,x1,y1] normalized 0-1 of the crop (use these to verify alignment, place colXs in vertical gaps between word clusters):\n${JSON.stringify(ocrData)}`;
+    userContent += `\n\nOCR word boxes [x0,y0,x1,y1] normalized 0-1 of the crop image (image is ${W}x${H} px). Each entry is one OCR'd word's bounding rectangle. Use vertical gaps between word clusters to anchor colXs:\n${JSON.stringify(ocrData)}`;
   }
 
   const content = await callAi({

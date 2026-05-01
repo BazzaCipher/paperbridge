@@ -74,7 +74,6 @@ const ExtractedRegionSchema = z.object({
   dataType: SimpleDataTypeSchema,
   color: z.string(),
   valueCache: ValueCacheSchema.optional(),
-  role: z.enum(['amount', 'date', 'description']).optional(),
   // Table-row regions: link back to the parent TableRecord on the node so
   // the row stays grouped and the parent table can re-materialize.
   tableSourceId: z.string().optional(),
@@ -206,7 +205,7 @@ const ExtractorNodeDataSchema = FileNodeDataSchema.extend({
   currentPage: z.number(),
   totalPages: z.number(),
   outputs: z.record(z.string(), z.any()).optional(), // Runtime computed
-  invoiceTxnGroupId: z.string().optional(),
+  singleTxnGroupIds: z.array(z.string()).optional(),
   // Materialized tables produced by table-mode selection. Each entry persists
   // the user's bbox + row/col separators so the table can be re-materialized
   // and its TxnGroup handle re-rendered after reload.

@@ -243,60 +243,42 @@ export function materializedTableToTxnGroup(
   };
 }
 
-// ─── Invoice TxnGroup (single-Transaction from role-tagged regions) ──────
+// ─── Single-transaction TxnGroup from explicit OCR'd values ──────────────
 
-interface RoleTaggedRegion {
-  id: string;
-  role?: 'amount' | 'date' | 'description';
-  /** Display value already normalized (e.g. ISO date for `date`). */
-  value: string;
-}
-
-export interface InvoiceTxnGroupMeta {
+export interface SingleTxnInputs {
   nodeId: string;
-  /** Falls back to label of node when no description-roled region exists. */
   label: string;
+  date: string;
+  description: string;
+  amount: string;
   /** Optional id to assign; otherwise generated. */
   id?: string;
 }
 
 /**
- * Build a single-Transaction TxnGroup from an ExtractorNode's role-tagged
- * regions. Returns null if no region has `role: 'amount'` or the amount
- * doesn't parse. Description falls back to `meta.label` when no
- * description-roled region exists.
+ * Build a one-row TxnGroup directly from already-OCR'd date / description /
+ * amount strings. Returns null when amount doesn't parse.
  */
-export function regionsToInvoiceTxnGroup(
-  regions: RoleTaggedRegion[],
-  meta: InvoiceTxnGroupMeta,
-): TxnGroup | null {
-  const amountRegion = regions.find((r) => r.role === 'amount');
-  if (!amountRegion) return null;
-  const amount = parseSignedAmount(amountRegion.value, { negativeParens: true, currencySymbols: true });
+export function singleTxnGroup(inputs: SingleTxnInputs): TxnGroup | null {
+  const amount = parseSignedAmount(inputs.amount, { negativeParens: true, currencySymbols: true });
   if (!Number.isFinite(amount)) return null;
-
-  const dateRegion = regions.find((r) => r.role === 'date');
-  const descRegion = regions.find((r) => r.role === 'description');
-
-  const date = dateRegion ? normalizeDate(dateRegion.value) : '';
-  const description = (descRegion?.value || meta.label || '').trim();
-
+  const date = inputs.date ? normalizeDate(inputs.date) : '';
+  const description = (inputs.description || inputs.label || '').trim();
   return {
-    id: meta.id ?? `txngroup-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    label: meta.label,
+    id: inputs.id ?? `txngroup-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    label: inputs.label,
     transactions: [
       {
         id: hashTxn(date, amount, description),
         amount,
         date,
         description,
-        sourceNodeId: meta.nodeId,
-        sourceRowId: amountRegion.id,
+        sourceNodeId: inputs.nodeId,
       },
     ],
     origin: {
       kind: 'invoice',
-      nodeIds: [meta.nodeId],
+      nodeIds: [inputs.nodeId],
       extractedAt: new Date().toISOString(),
     },
   };

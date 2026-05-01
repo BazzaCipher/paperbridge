@@ -17,7 +17,7 @@ import { detectFields, fieldOverlapsExisting } from '../../core/extraction/field
 import { buildTableSelectionFromOcr } from '../../core/extraction/tableParser';
 import { materializeTable, type TableSelection, type MaterializedTable } from '../../core/extraction/tableMaterializer';
 import { detectTableWithAI } from '../../services/aiService';
-import { suggestBankMapping, inferMappingFromContent, materializedTableToTxnGroup, regionsToInvoiceTxnGroup } from '../../core/sources/txnGroup';
+import { suggestBankMapping, inferMappingFromContent, materializedTableToTxnGroup, singleTxnGroup } from '../../core/sources/txnGroup';
 import { useAiSettings } from '../../hooks/useAiSettings';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useToast } from '../ui/Toast';
@@ -29,7 +29,7 @@ import { generateId } from '../../utils/id';
 import { debug } from '../../utils/debug'; // see src/utils/debug.ts
 
 const log = debug('extractor');
-import { createRegionFromBox, createRegionFromText, roleFromFieldType } from '../../utils/regions';
+import { createRegionFromBox, createRegionFromText } from '../../utils/regions';
 import { BlobRegistry } from '../../store/canvasPersistence';
 import { FilePickerModal } from '../ui/FilePickerModal';
 import type {
@@ -145,6 +145,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectionMode, setSelectionMode] = useState<'select' | 'box' | 'text' | 'single' | 'table'>('box');
   const [singleStep, setSingleStep] = useState<'date' | 'description' | 'amount' | null>(null);
+  const singleDraftRef = useRef<{ date: string; description: string; amount: string }>({ date: '', description: '', amount: '' });
   const [txnDropdownOpen, setTxnDropdownOpen] = useState(false);
   const [addingColumnFor, setAddingColumnFor] = useState<string | null>(null);
   const [isExtractingTable, setIsExtractingTable] = useState(false);
@@ -201,59 +202,6 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     nodeOutputs
   );
 
-  // ── Maintain invoice TxnGroup from role-tagged regions ───────────────────
-  // Single-Transaction TxnGroup emitted when any region has role: 'amount'.
-  // Synced into txnGroupSlice; id persisted on data.invoiceTxnGroupId.
-  useEffect(() => {
-    // Only standalone box/text regions feed the invoice TxnGroup. Regions
-    // owned by a table already participate in that table's TxnGroup; double
-    // counting them would race the two effects and emit a conflicting group.
-    const standalone = data.regions.filter((r) => !r.tableSourceId);
-    const hasAmount = standalone.some((r) => r.role === 'amount');
-    const persistedId = data.invoiceTxnGroupId;
-    log('invoice-effect', {
-      nodeId: id,
-      standalone: standalone.length,
-      roles: standalone.map((r) => r.role).filter(Boolean),
-      hasAmount,
-      persistedId,
-    });
-
-    if (!hasAmount) {
-      if (persistedId) {
-        removeTxnGroup(persistedId);
-        updateNodeData(id, { invoiceTxnGroupId: undefined });
-      }
-      return;
-    }
-
-    const tagged = standalone
-      .filter((r) => r.role)
-      .map((r) => ({
-        id: r.id,
-        role: r.role,
-        value: String(r.extractedData?.value ?? ''),
-      }));
-
-    const group = regionsToInvoiceTxnGroup(tagged, {
-      nodeId: id,
-      label: data.label || 'Invoice',
-      id: persistedId,
-    });
-    if (!group) return;
-
-    const existing = persistedId ? getTxnGroup(persistedId) : undefined;
-    if (existing?.edited) return;
-    if (persistedId && existing) {
-      updateTxnGroup(persistedId, group);
-    } else {
-      const newId = addTxnGroup(group);
-      if (newId !== persistedId) {
-        updateNodeData(id, { invoiceTxnGroupId: newId });
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, data.regions, data.label, data.invoiceTxnGroupId]);
 
   const handleFileInit = useCallback(
     (fileData: { fileUrl: string; fileId: string; fileName: string; fileType: 'pdf' | 'image' }) => {
@@ -307,13 +255,12 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
   );
 
   const handleRegionCreate = useCallback(
-    (coordinates: RegionCoordinates, pageNumber?: number, role?: 'amount' | 'date' | 'description') => {
-      const newRegion = createRegionFromBox(
+    (coordinates: RegionCoordinates, pageNumber?: number) => {
+      const region = createRegionFromBox(
         coordinates,
         pageNumber ?? data.currentPage,
         data.regions.length
       );
-      const region = role ? { ...newRegion, role } : newRegion;
       updateNodeData(id, { regions: [...data.regions, region] });
       setSelectedRegionId(region.id);
     },
@@ -351,6 +298,8 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
               {
                 images: [cropImage],
                 ocrWords: ocr.words,
+                imageWidth: ocr.imageWidth,
+                imageHeight: ocr.imageHeight,
                 hintBbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
               },
               activeProvider.id,
@@ -567,12 +516,12 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
 
   const txnGroupIds = useMemo(() => {
     const ids: string[] = [];
-    if (data.invoiceTxnGroupId) ids.push(data.invoiceTxnGroupId);
+    for (const gid of data.singleTxnGroupIds ?? []) ids.push(gid);
     for (const t of data.tables ?? []) {
       if (t.txnGroupId) ids.push(t.txnGroupId);
     }
     return ids;
-  }, [data.invoiceTxnGroupId, data.tables]);
+  }, [data.singleTxnGroupIds, data.tables]);
 
   const applyColumnSelection = useCallback(
     (tableId: string, nextSelection: TableSelection) => {
@@ -671,6 +620,8 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           {
             images: [cropImage],
             ocrWords: ocr.words,
+            imageWidth: ocr.imageWidth,
+            imageHeight: ocr.imageHeight,
             hintBbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
           },
           activeProvider.id,
@@ -800,53 +751,54 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
   );
 
   const handleSingleStepCreate = useCallback(
-    async (coordinates: RegionCoordinates, pageNumber?: number) => {
-      const role = singleStep ?? 'date';
-      const page = pageNumber ?? data.currentPage;
-      const baseRegion = createRegionFromBox(coordinates, page, data.regions.length);
-      const region: ExtractedRegion = {
-        ...baseRegion,
-        role,
-        label: role === 'date' ? 'Date' : role === 'description' ? 'Description' : 'Amount',
-      };
-      updateNodeData(id, { regions: [...data.regions, region] });
-      setSelectedRegionId(region.id);
-
-      if (data.fileUrl) {
-        try {
-          const result = await extractTextFromRegion(data.fileUrl, coordinates);
-          updateNodeData(id, {
-            regions: [
-              ...data.regions,
-              {
-                ...region,
-                extractedData: {
-                  ...result.dataValue,
-                  source: {
-                    nodeId: id,
-                    regionId: region.id,
-                    pageNumber: page,
-                    coordinates,
-                    extractionMethod: 'ocr' as const,
-                    confidence: result.confidence,
-                  },
-                },
-              },
-            ],
-          });
-        } catch (err) {
-          console.warn('Single-mode OCR failed:', err);
-        }
+    async (coordinates: RegionCoordinates, _pageNumber?: number) => {
+      const step = singleStep ?? 'date';
+      if (!data.fileUrl) {
+        showToast('Document not loaded', 'warning');
+        return;
       }
 
-      const next = role === 'date' ? 'description' : role === 'description' ? 'amount' : null;
-      setSingleStep(next);
-      if (next === null) {
-        showToast('Single transaction captured', 'success');
-        setSelectionMode('select');
+      let value = '';
+      try {
+        const result = await extractTextFromRegion(data.fileUrl, coordinates);
+        value = String(result.dataValue.value ?? '');
+      } catch (err) {
+        console.warn('Single-mode OCR failed:', err);
+        showToast('OCR failed for this selection', 'error');
+        return;
       }
+
+      singleDraftRef.current = { ...singleDraftRef.current, [step]: value };
+
+      if (step !== 'amount') {
+        const next = step === 'date' ? 'description' : 'amount';
+        setSingleStep(next);
+        showToast(`${step}: ${value || '(empty)'}`, 'info');
+        return;
+      }
+
+      // Final step — assemble the TxnGroup and add it to the store.
+      const draft = singleDraftRef.current;
+      const group = singleTxnGroup({
+        nodeId: id,
+        label: data.label || 'Single transaction',
+        date: draft.date,
+        description: draft.description,
+        amount: draft.amount,
+      });
+      if (!group) {
+        showToast(`Couldn't parse amount "${draft.amount}"`, 'error');
+        return;
+      }
+      const newId = addTxnGroup(group);
+      const existing = data.singleTxnGroupIds ?? [];
+      updateNodeData(id, { singleTxnGroupIds: [...existing, newId] });
+      singleDraftRef.current = { date: '', description: '', amount: '' };
+      setSingleStep(null);
+      setSelectionMode('select');
+      showToast('Single transaction added', 'success');
     },
-    [singleStep, data.currentPage, data.regions, data.fileUrl, id, updateNodeData],
+    [singleStep, data.fileUrl, data.label, data.singleTxnGroupIds, id, addTxnGroup, updateNodeData, showToast],
   );
 
   const handleBoxOrTableCreate = useCallback(
@@ -903,12 +855,9 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       const group = getTxnGroup(groupId);
       if (!group) return;
       if (group.origin.kind === 'invoice') {
-        // Clear role tags on standalone regions; the invoice useEffect cleans up the group.
-        updateNodeData(id, {
-          regions: data.regions.map((r) =>
-            r.tableSourceId ? r : { ...r, role: undefined },
-          ),
-        });
+        const remaining = (data.singleTxnGroupIds ?? []).filter((gid) => gid !== groupId);
+        updateNodeData(id, { singleTxnGroupIds: remaining });
+        removeTxnGroup(groupId);
       } else if (group.origin.kind === 'bank') {
         const table = (data.tables ?? []).find((t) => t.txnGroupId === groupId);
         if (!table) return;
@@ -919,7 +868,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
         removeTxnGroup(groupId);
       }
     },
-    [id, data.regions, data.tables, updateNodeData, getTxnGroup, removeTxnGroup],
+    [id, data.tables, data.singleTxnGroupIds, updateNodeData, getTxnGroup, removeTxnGroup],
   );
 
   const handleTextSelect = useCallback(
@@ -993,17 +942,6 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       });
     },
     [id, data.regions, updateNodeData]
-  );
-
-  const handleRegionRoleChange = useCallback(
-    (regionId: string, role: 'amount' | 'date' | 'description' | undefined) => {
-      updateNodeData(id, {
-        regions: data.regions.map((r) =>
-          r.id === regionId ? { ...r, role } : r,
-        ),
-      });
-    },
-    [id, data.regions, updateNodeData],
   );
 
   const handleValueChange = useCallback(
@@ -1159,7 +1097,6 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           },
           dataType: field.dataType,
           color: getColorForType(field.dataType).border,
-          role: roleFromFieldType(field.fieldType),
         };
       });
 
@@ -1312,11 +1249,11 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           )}
         </div>
 
-        {/* Invoice TxnGroup handle - emitted when any region has role: 'amount' */}
-        {data.invoiceTxnGroupId && (
+        {/* Single-transaction TxnGroup handles — one per Single-mode capture. */}
+        {(data.singleTxnGroupIds ?? []).map((gid, i) => (
           <TxnGroupHandle
-            key={`txngroup-invoice-${data.invoiceTxnGroupId}`}
-            name={data.invoiceTxnGroupId}
+            key={`txngroup-single-${gid}`}
+            name={gid}
             handleType="source"
             handlePosition={Position.Right}
           >
@@ -1324,10 +1261,10 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
               <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500 text-white flex-shrink-0">
                 Txn
               </span>
-              <span className="text-xs font-medium text-emerald-800 truncate">Invoice</span>
+              <span className="text-xs font-medium text-emerald-800 truncate">Single {i + 1}</span>
             </div>
           </TxnGroupHandle>
-        )}
+        ))}
 
         {/* TxnGroup handles - one per detected bank statement table */}
         {(data.tables ?? [])
@@ -1361,7 +1298,6 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
           onRegionDelete={handleRegionDelete}
           onRegionLabelChange={handleRegionLabelChange}
           onRegionDataTypeChange={handleRegionDataTypeChange}
-          onRegionRoleChange={handleRegionRoleChange}
           compact
           nodeId={id}
         />
@@ -1517,7 +1453,6 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                 onRegionDelete={handleRegionDelete}
                 onRegionLabelChange={handleRegionLabelChange}
                 onRegionDataTypeChange={handleRegionDataTypeChange}
-                onRegionRoleChange={handleRegionRoleChange}
                 onValueChange={handleValueChange}
                 onExtract={handleExtract}
                 isExtracting={isExtracting}
@@ -1555,7 +1490,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                 : selectionMode === 'box'
                 ? 'Draw a box to create a field.'
                 : selectionMode === 'single'
-                ? 'Draw a box around a value (defaults to amount; change role in the field).'
+                ? 'Draw boxes for date, then description, then amount.'
                 : selectionMode === 'table'
                 ? 'Draw a box around a table to extract its rows.'
                 : 'Select text directly to create a field with that value.'}

@@ -20,7 +20,6 @@ interface RegionListProps {
   onRegionDelete: (regionId: string) => void;
   onRegionLabelChange: (regionId: string, label: string) => void;
   onRegionDataTypeChange: (regionId: string, dataType: SimpleDataType) => void;
-  onRegionRoleChange?: (regionId: string, role: 'amount' | 'date' | 'description' | undefined) => void;
   onValueChange?: (regionId: string, value: string) => void;
   onExtract?: (regionId: string) => void;
   isExtracting?: boolean;
@@ -79,7 +78,6 @@ export function RegionList({
   onRegionDelete,
   onRegionLabelChange,
   onRegionDataTypeChange,
-  onRegionRoleChange,
   onValueChange,
   onExtract,
   isExtracting = false,
@@ -112,17 +110,11 @@ export function RegionList({
   if (compact) {
     // Skip table-owned rows — they live in the TxnGroup, not the field list.
     const standalone = regions.filter((r) => !r.tableSourceId);
-    const txnRegions = standalone.filter((r) => r.role);
-    const fieldRegions = standalone.filter((r) => !r.role);
 
-    const renderRow = (region: ExtractedRegion, opts?: { roleLed?: boolean }) => {
+    const renderRow = (region: ExtractedRegion) => {
       const displayValue = getDisplayValue(region);
       const typeColor = getTypeBadgeClass(region.dataType);
       const isExternal = isExternallyHighlighted(region.id);
-      const roleLabel = region.role === 'description' ? 'Desc' : region.role
-        ? region.role.charAt(0).toUpperCase() + region.role.slice(1)
-        : null;
-
       return (
         <NodeEntry
           key={region.id}
@@ -139,15 +131,7 @@ export function RegionList({
             onClick={() => onRegionSelect(region.id)}
           >
             <div className={`w-2 h-2 rounded-full flex-shrink-0 ${typeColor}`} />
-            {opts?.roleLed && roleLabel ? (
-              <span className="text-[10px] font-medium uppercase tracking-wide text-bridge-500 w-12 flex-shrink-0">
-                {roleLabel}
-              </span>
-            ) : (
-              <span className="text-xs text-bridge-500 truncate max-w-[80px]">
-                {region.label}
-              </span>
-            )}
+            <span className="text-xs text-bridge-500 truncate max-w-[80px]">{region.label}</span>
             <span className={`text-sm font-medium truncate flex-1 ${
               displayValue ? 'text-bridge-900' : 'text-bridge-400'
             }`}>
@@ -160,38 +144,11 @@ export function RegionList({
 
     return (
       <div className="divide-y divide-paper-100">
-        <div>
-          <div className="px-3 py-1 bg-paper-50">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-bridge-500">
-              Transaction
-            </span>
-          </div>
-          {txnRegions.length > 0 ? (
-            <div className="divide-y divide-paper-100">
-              {txnRegions.map((r) => renderRow(r, { roleLed: true }))}
-            </div>
-          ) : (
-            <div className="px-3 py-2 text-[11px] text-bridge-400 italic">
-              Tag a field as amount / date / desc to populate
-            </div>
-          )}
-        </div>
-        <div>
-          <div className="px-3 py-1 bg-paper-50">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-bridge-500">
-              Fields
-            </span>
-          </div>
-          {fieldRegions.length > 0 ? (
-            <div className="divide-y divide-paper-100">
-              {fieldRegions.map((r) => renderRow(r))}
-            </div>
-          ) : (
-            <div className="px-3 py-2 text-[11px] text-bridge-400 italic">
-              No untagged fields
-            </div>
-          )}
-        </div>
+        {standalone.length > 0 ? (
+          standalone.map((r) => renderRow(r))
+        ) : (
+          <div className="px-3 py-2 text-[11px] text-bridge-400 italic">No fields</div>
+        )}
       </div>
     );
   }
@@ -305,36 +262,6 @@ export function RegionList({
                   </button>
                 ))}
               </div>
-
-              {/* Reconciliation role tag - only standalone regions; table rows
-                  belong to their parent TxnGroup and aren't tagged individually. */}
-              {onRegionRoleChange && !region.tableSourceId && (
-                <div className="flex items-center gap-1 mb-2 text-[10px]">
-                  <span className="text-bridge-400 mr-1">Role:</span>
-                  {([
-                    { value: undefined, label: 'none' },
-                    { value: 'amount' as const, label: 'amount' },
-                    { value: 'date' as const, label: 'date' },
-                    { value: 'description' as const, label: 'desc' },
-                  ]).map((opt) => (
-                    <button
-                      key={opt.label}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRegionRoleChange(region.id, opt.value);
-                      }}
-                      className={`px-1.5 py-0.5 rounded transition-colors ${
-                        region.role === opt.value
-                          ? 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-300'
-                          : 'bg-paper-100 text-bridge-500 hover:bg-paper-200'
-                      }`}
-                      title={`Tag as ${opt.label}`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              )}
 
               {/* Value display/input */}
               <div className={`rounded p-2 ${getTypeColorClass(region.dataType)} ${

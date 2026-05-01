@@ -184,8 +184,8 @@ export function LynkCanvas() {
       for (const child of nodes) {
         if (child.parentId !== groupId) continue;
         childNodeIds.push(child.id);
-        const cd = child.data as { invoiceTxnGroupId?: string; tables?: Array<{ txnGroupId?: string }>; aggregatedTxnGroupId?: string };
-        if (cd.invoiceTxnGroupId) childTxnGroupIds.push(cd.invoiceTxnGroupId);
+        const cd = child.data as { singleTxnGroupIds?: string[]; tables?: Array<{ txnGroupId?: string }>; aggregatedTxnGroupId?: string };
+        for (const gid of cd.singleTxnGroupIds ?? []) childTxnGroupIds.push(gid);
         if (cd.aggregatedTxnGroupId) childTxnGroupIds.push(cd.aggregatedTxnGroupId);
         for (const t of cd.tables ?? []) {
           if (t.txnGroupId) childTxnGroupIds.push(t.txnGroupId);

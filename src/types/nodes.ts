@@ -102,11 +102,10 @@ export interface ExtractorNodeData extends BaseNodeData, FileNodeData, Exportabl
   /** User-defined ledger columns. If omitted, defaults are applied at render time. */
   columns?: ExtractorColumn[];
   /**
-   * Persisted TxnGroup id for the single-Transaction "invoice" group emitted
-   * when at least one region has `role: 'amount'`. Lets the handle survive
-   * reload without re-creating the slice entry.
+   * TxnGroup ids for one-row groups created via the Single mode flow.
+   * Each Single capture appends a new id; deletes splice it out.
    */
-  invoiceTxnGroupId?: string;
+  singleTxnGroupIds?: string[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

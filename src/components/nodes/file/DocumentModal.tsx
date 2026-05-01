@@ -62,30 +62,20 @@ export function DocumentModal({
       fullscreen={fullscreen}
       onToggleFullscreen={onToggleFullscreen}
     >
-      <div className={`relative flex ${fullscreen ? 'h-[calc(100vh-49px)]' : 'h-[75vh]'}`}>
+      <div className={`flex ${fullscreen ? 'h-[calc(100vh-49px)]' : 'h-[75vh]'}`}>
         <div
           className="flex-1 overflow-auto bg-paper-50 relative"
           ref={viewerAreaRef}
           onDoubleClick={(e) => e.stopPropagation()}
         >
+          <div className="sticky top-0 z-20 flex items-center gap-2 py-2 px-4 bg-white border-b border-paper-200 shadow-sm">
+            {toolbar}
+            <div className="flex-1" />
+            <ZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onReset={onResetZoom} />
+          </div>
           {children}
         </div>
         {panel}
-
-        {/* Floating toolbar — centered over the full modal body so opening a side panel
-            doesn't shift it. Mirrors the centered TopBar on the main canvas. */}
-        <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 max-w-[calc(100%-2rem)]">
-          <div className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 bg-white/90 backdrop-blur-md border border-paper-200 rounded-xl shadow-[0_2px_12px_rgba(16,42,67,0.08)]">
-            {toolbar}
-          </div>
-        </div>
-
-        {/* Zoom pinned to top-right of the viewer area, independent of panel state. */}
-        <div className="pointer-events-none absolute top-3 right-3 z-20">
-          <div className="pointer-events-auto bg-white/90 backdrop-blur-md border border-paper-200 rounded-xl shadow-[0_2px_12px_rgba(16,42,67,0.08)] px-1 py-0.5">
-            <ZoomControls zoom={zoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onReset={onResetZoom} />
-          </div>
-        </div>
       </div>
       {footer}
     </Modal>

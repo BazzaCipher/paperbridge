@@ -274,6 +274,7 @@ export function singleTxnGroup(inputs: SingleTxnInputs): TxnGroup | null {
         date,
         description,
         sourceNodeId: inputs.nodeId,
+        sourceRowId: 'single',
       },
     ],
     origin: {

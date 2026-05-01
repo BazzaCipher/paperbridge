@@ -246,6 +246,7 @@ function importLynkArchive(archiveData: Uint8Array): ImportResult {
       registeredAt: Date.now(),
       nodeIds: new Set<string>(),
       folderId: fileMeta.folderId,
+      canvasId: manifest.metadata.id,
     });
   }
 

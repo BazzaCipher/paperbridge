@@ -30,7 +30,7 @@ vi.stubGlobal('document', {
 // ─── BlobRegistry mock ───────────────────────────────────────────────────────
 const blobMeta = new Map<string, {
   fileId: string; fileName: string; mimeType: string; size: number;
-  fileType: 'pdf' | 'image'; nodeIds: Set<string>;
+  fileType: 'pdf' | 'image'; nodeIds: Set<string>; canvasId: string;
 }>();
 const blobData = new Map<string, Blob>();
 

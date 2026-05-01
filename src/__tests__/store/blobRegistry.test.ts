@@ -72,7 +72,7 @@ describe('BlobRegistry', () => {
   it('renameFile updates fileName', () => {
     BlobRegistry.metadata.set('f1', {
       fileId: 'f1', fileName: 'old.pdf', mimeType: 'application/pdf',
-      size: 0, fileType: 'pdf', contentHash: '', registeredAt: 0, nodeIds: new Set(),
+      size: 0, fileType: 'pdf', contentHash: '', registeredAt: 0, nodeIds: new Set(), canvasId: 'c1',
     });
     BlobRegistry.renameFile('f1', 'new.pdf');
     expect(BlobRegistry.getMetadata('f1')?.fileName).toBe('new.pdf');
@@ -80,17 +80,17 @@ describe('BlobRegistry', () => {
 
   it('getAllMetadata returns all entries', () => {
     BlobRegistry.metadata.set('f1', {
-      fileId: 'f1', fileName: 'a', mimeType: '', size: 0, fileType: 'image', contentHash: '', registeredAt: 0, nodeIds: new Set(),
+      fileId: 'f1', fileName: 'a', mimeType: '', size: 0, fileType: 'image', contentHash: '', registeredAt: 0, nodeIds: new Set(), canvasId: 'c1',
     });
     BlobRegistry.metadata.set('f2', {
-      fileId: 'f2', fileName: 'b', mimeType: '', size: 0, fileType: 'image', contentHash: '', registeredAt: 0, nodeIds: new Set(),
+      fileId: 'f2', fileName: 'b', mimeType: '', size: 0, fileType: 'image', contentHash: '', registeredAt: 0, nodeIds: new Set(), canvasId: 'c1',
     });
     expect(BlobRegistry.getAllMetadata()).toHaveLength(2);
   });
 
   it('findByHash returns matching metadata', () => {
     BlobRegistry.metadata.set('f1', {
-      fileId: 'f1', fileName: 'a', mimeType: '', size: 0, fileType: 'image', contentHash: 'abc123', registeredAt: 0, nodeIds: new Set(),
+      fileId: 'f1', fileName: 'a', mimeType: '', size: 0, fileType: 'image', contentHash: 'abc123', registeredAt: 0, nodeIds: new Set(), canvasId: 'c1',
     });
     expect(BlobRegistry.findByHash('abc123')?.fileId).toBe('f1');
     expect(BlobRegistry.findByHash('nonexistent')).toBeUndefined();
@@ -100,7 +100,7 @@ describe('BlobRegistry', () => {
     const blob = new Blob(['test']);
     const { fileId, blobUrl } = BlobRegistry.register(blob);
     BlobRegistry.metadata.set(fileId, {
-      fileId, fileName: 'test', mimeType: '', size: 0, fileType: 'image', contentHash: '', registeredAt: 0, nodeIds: new Set(),
+      fileId, fileName: 'test', mimeType: '', size: 0, fileType: 'image', contentHash: '', registeredAt: 0, nodeIds: new Set(), canvasId: 'c1',
     });
     BlobRegistry.removeFile(fileId);
     expect(BlobRegistry.getBlob(fileId)).toBeUndefined();

@@ -327,7 +327,8 @@ export async function detectTableWithAI(
     return validateTableSelection(obj);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to parse AI response as TableSelection: ${msg}`);
+    console.error('[detectTableWithAI] raw response:', content);
+    throw new Error(`Failed to parse AI response as TableSelection: ${msg}. Raw: ${content.slice(0, 200)}`);
   }
 }
 

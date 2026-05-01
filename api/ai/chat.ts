@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { generateText, streamText, tool } from 'ai';
+import { generateText, streamText, tool, Output } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
@@ -420,6 +420,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       res.write('data: [DONE]\n\n');
       return res.end();
+    }
+
+    // Structured output for table detection — guarantees JSON shape.
+    if (mode === 'detect_table') {
+      const tableSchema = z.object({
+        bbox: z.object({ x0: z.number(), y0: z.number(), x1: z.number(), y1: z.number() }),
+        rowYs: z.array(z.number()),
+        colXs: z.array(z.number()),
+        headerRowIndex: z.number().nullable().optional(),
+      });
+      const out = await generateText({
+        model: resolvedModel,
+        system,
+        messages: modelMessages,
+        experimental_output: Output.object({ schema: tableSchema }),
+        maxOutputTokens: 4096,
+      });
+      return res.status(200).json({ content: JSON.stringify(out.experimental_output), toolCalls: undefined });
     }
 
     // Non-streaming response — detect_fields needs more tokens for large documents

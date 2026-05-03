@@ -219,6 +219,7 @@ Row grouping — IMPORTANT for bank statements:
 - Continuation lines (no date, no debit, no credit) belong to the prior logical row — JOIN their description text into the prior row's Particulars cell, separated by " " or "\n".
 - rowYs separators must align with these LOGICAL row boundaries, not every visual line. So if 3 visual lines belong to one transaction, do NOT put rowYs separators between them.
 - The opening "Brought forward" line and closing balance line each count as their own logical row.
+- Informational notices that have a date but no money (e.g. "Interest Rate Brought Forward Is 0.11%", "Statement period:", account closure messages) are their own logical row — DO NOT merge them with the next transaction. They belong on their own line with empty Debit/Credit/Balance.
 
 Return ONLY the JSON object, no prose.`;
 

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { generateText, streamText, tool, Output } from 'ai';
+import { generateText, streamText, tool } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
@@ -458,35 +458,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.end();
     }
 
-    // Structured output for table detection — guarantees JSON shape.
-    if (mode === 'detect_table') {
-      const tableSchema = z.object({
-        bbox: z.object({ x0: z.number(), y0: z.number(), x1: z.number(), y1: z.number() }),
-        rowYs: z.array(z.number()),
-        colXs: z.array(z.number()),
-        headerRowIndex: z.number().nullable().optional(),
-      });
+    // Plain-text JSON for both table modes. experimental_output (strict
+    // schema) intermittently throws "No output generated" on Gemini even for
+    // small responses. The client parses loose JSON via extractJsonObject and
+    // validates shape itself, so we don't need server-side schema validation.
+    if (mode === 'detect_table' || mode === 'extract_table') {
       const out = await generateText({
         model: resolvedModel,
         system,
         messages: modelMessages,
-        experimental_output: Output.object({ schema: tableSchema }),
-        maxOutputTokens: 4096,
-      });
-      return res.status(200).json({ content: JSON.stringify(out.experimental_output), toolCalls: undefined });
-    }
-
-    // Plain-text JSON for full table extraction. We don't use
-    // experimental_output here because Gemini's strict structured-output mode
-    // intermittently throws "No output generated" on long bank-statement
-    // responses (cells + rowYs make the JSON large). Plain text + client-side
-    // extractJsonObject handles loose JSON robustly.
-    if (mode === 'extract_table') {
-      const out = await generateText({
-        model: resolvedModel,
-        system,
-        messages: modelMessages,
-        maxOutputTokens: 32768,
+        maxOutputTokens: mode === 'extract_table' ? 32768 : 4096,
       });
       const text = out.text ?? '';
       if (!text.trim()) {

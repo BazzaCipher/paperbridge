@@ -476,23 +476,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ content: JSON.stringify(out.experimental_output), toolCalls: undefined });
     }
 
-    // Structured output for full table extraction (layout + cell text from vision)
+    // Plain-text JSON for full table extraction. We don't use
+    // experimental_output here because Gemini's strict structured-output mode
+    // intermittently throws "No output generated" on long bank-statement
+    // responses (cells + rowYs make the JSON large). Plain text + client-side
+    // extractJsonObject handles loose JSON robustly.
     if (mode === 'extract_table') {
-      const extractSchema = z.object({
-        bbox: z.object({ x0: z.number(), y0: z.number(), x1: z.number(), y1: z.number() }),
-        rowYs: z.array(z.number()),
-        colXs: z.array(z.number()),
-        headerRowIndex: z.number().nullable().optional(),
-        cells: z.array(z.array(z.string())),
-      });
       const out = await generateText({
         model: resolvedModel,
         system,
         messages: modelMessages,
-        experimental_output: Output.object({ schema: extractSchema }),
-        maxOutputTokens: 16384,
+        maxOutputTokens: 32768,
       });
-      return res.status(200).json({ content: JSON.stringify(out.experimental_output), toolCalls: undefined });
+      const text = out.text ?? '';
+      if (!text.trim()) {
+        return res.status(502).json({
+          error: 'AI returned empty response. The image may be too large or the model timed out — try cropping the table tighter and retry.',
+        });
+      }
+      return res.status(200).json({ content: text, toolCalls: undefined });
     }
 
     // Non-streaming response — detect_fields needs more tokens for large documents

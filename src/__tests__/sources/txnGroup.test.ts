@@ -118,6 +118,48 @@ describe('materializedTableToTxnGroup — debit/credit pair (CBA-style)', () => 
   });
 });
 
+describe('materializedTableToTxnGroup — multi-line description merge', () => {
+  // Captured directly from the AI vision response on the NAB statement.
+  // One logical "Internet Transfer" txn spans two visual lines: the first
+  // carries the amount, the second only carries a continuation of the desc.
+  const nabTable: MaterializedTable = {
+    headers: ['Date', 'Particulars', 'Debits', 'Credits', 'Balance'],
+    rows: [
+      ['7 Sep 2019', 'Brought forward', '', '', '26,659.01 Cr'],
+      ['9 Sep 2019', 'Interest Rate Brought Forward Is 0.11%', '', '', ''],
+      ['', 'Internet Transfer', '20.00', '', ''],
+      ['', 'X Li.....................................................................t', '', '', ''],
+      ['', 'Internet Transfer', '100.00', '', ''],
+      ['', 'X Li.....................................................................t', '', '', ''],
+    ],
+    cellBoxes: [],
+  };
+
+  it('collapses continuation rows into the prior logical transaction', () => {
+    const g = materializedTableToTxnGroup(
+      nabTable,
+      { date: 'Date', description: 'Particulars', debit: 'Debits', credit: 'Credits', balance: 'Balance' },
+      META,
+    );
+    expect(g.transactions).toHaveLength(4);
+
+    // Row 0: Brought forward (no debit/credit, opening balance only)
+    expect(g.transactions[0].description).toBe('Brought forward');
+
+    // Row 1: Interest rate notice
+    expect(g.transactions[1].description).toContain('Interest Rate Brought Forward');
+
+    // Row 2: Internet Transfer 20.00 — must absorb the X Li... continuation
+    expect(g.transactions[2].description).toBe('Internet Transfer X Li.....................................................................t');
+    expect(g.transactions[2].amount).toBe(-20);
+
+    // Row 3: Internet Transfer 100.00 — likewise
+    expect(g.transactions[3].description).toContain('Internet Transfer');
+    expect(g.transactions[3].description).toContain('X Li');
+    expect(g.transactions[3].amount).toBe(-100);
+  });
+});
+
 describe('suggestBankMapping', () => {
   it('detects single-amount layout', () => {
     const table: MaterializedTable = {

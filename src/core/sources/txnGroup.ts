@@ -177,13 +177,51 @@ export function materializedTableToTxnGroup(
   const creditCol = idx(mapping.credit);
   const balanceCol = idx(mapping.balance);
 
-  const transactions: Transaction[] = [];
+  // Merge continuation rows into their predecessor before emitting transactions.
+  // A continuation row has empty date, empty debit, empty credit, empty balance
+  // — it carries only extra description text that wraps from the prior line.
+  // This is common on bank statements where one logical transaction spans
+  // multiple visual lines (e.g. "Internet Transfer" / "X Li12345" / "Ref ABC").
+  const cell = (row: string[], col: number): string =>
+    col >= 0 ? (row[col] ?? '').trim() : '';
 
+  type LogicalRow = { srcRow: string[]; descParts: string[]; firstIdx: number };
+  const logicalRows: LogicalRow[] = [];
   for (let rowIdx = 0; rowIdx < table.rows.length; rowIdx++) {
     const row = table.rows[rowIdx];
+    const dateTxt = cell(row, dateCol);
+    const descTxt = cell(row, descCol);
+    const debitTxt = cell(row, debitCol);
+    const creditTxt = cell(row, creditCol);
+    const balanceTxt = cell(row, balanceCol);
+    const amountTxt = cell(row, amountCol);
+
+    // Skip fully blank rows.
+    if (!dateTxt && !descTxt && !debitTxt && !creditTxt && !balanceTxt && !amountTxt) continue;
+
+    const isContinuation =
+      logicalRows.length > 0 &&
+      !dateTxt &&
+      !debitTxt &&
+      !creditTxt &&
+      !balanceTxt &&
+      !amountTxt &&
+      !!descTxt;
+
+    if (isContinuation) {
+      logicalRows[logicalRows.length - 1].descParts.push(descTxt);
+    } else {
+      logicalRows.push({ srcRow: row, descParts: descTxt ? [descTxt] : [], firstIdx: rowIdx });
+    }
+  }
+
+  const transactions: Transaction[] = [];
+
+  for (const lr of logicalRows) {
+    const row = lr.srcRow;
     const rawDate = dateCol >= 0 ? (row[dateCol] ?? '') : '';
-    const rawDesc = descCol >= 0 ? (row[descCol] ?? '') : '';
-    if (!rawDate.trim() && !rawDesc.trim()) continue;
+    const mergedDesc = lr.descParts.join(' ').replace(/\s+/g, ' ').trim();
+    if (!rawDate.trim() && !mergedDesc) continue;
 
     const date = normalizeDate(rawDate);
 
@@ -197,9 +235,6 @@ export function materializedTableToTxnGroup(
       else if (Number.isFinite(debit) && debit !== 0) amount = -Math.abs(debit);
       else amount = 0;
     }
-    // Keep the row even when amount is unparseable — set to 0 so the user
-    // can correct the column mapping after the fact rather than silently
-    // losing transactions that the heuristic couldn't classify.
     if (!Number.isFinite(amount)) amount = 0;
 
     const balance = balanceCol >= 0
@@ -208,16 +243,17 @@ export function materializedTableToTxnGroup(
 
     const raw: Record<string, string> = {};
     headers.forEach((h, i) => { raw[h] = row[i] ?? ''; });
+    if (descCol >= 0) raw[headers[descCol] ?? 'Particulars'] = mergedDesc;
     if (Number.isFinite(balance)) raw.__balance = String(balance);
 
     transactions.push({
-      id: hashTxn(date, amount, rawDesc),
+      id: hashTxn(date, amount, mergedDesc),
       date,
-      description: rawDesc.trim(),
+      description: mergedDesc,
       amount,
       raw,
       sourceNodeId: meta.nodeId,
-      sourceRowId: `row-${rowIdx}`,
+      sourceRowId: `row-${lr.firstIdx}`,
     });
   }
 

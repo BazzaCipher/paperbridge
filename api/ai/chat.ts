@@ -213,6 +213,13 @@ Rules:
 - Every row must have exactly colXs.length+1 cells.
 - Exclude page margins, page numbers, footers from bbox.
 
+Row grouping — IMPORTANT for bank statements:
+- Emit ONE row per LOGICAL transaction, not one row per visual line. A single transaction commonly spans 2-5 visual lines (e.g. "Internet Transfer" / "X Li12345" / "Ref ABC" / "20.00").
+- A new logical row starts when EITHER a new date appears in the Date column, OR a new amount appears in the Debit/Credit column with no prior amount on the current logical row.
+- Continuation lines (no date, no debit, no credit) belong to the prior logical row — JOIN their description text into the prior row's Particulars cell, separated by " " or "\n".
+- rowYs separators must align with these LOGICAL row boundaries, not every visual line. So if 3 visual lines belong to one transaction, do NOT put rowYs separators between them.
+- The opening "Brought forward" line and closing balance line each count as their own logical row.
+
 Return ONLY the JSON object, no prose.`;
 
 const FREEFORM_SYSTEM_PROMPT = `You are a helpful assistant for a document processing application called Paper Bridge. You help users understand their document data and set up extraction fields on their documents.

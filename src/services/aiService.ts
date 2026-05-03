@@ -1,6 +1,7 @@
 import type { AiChatRequest, AiDetectedField, AiConnectionSuggestion, AiMessage, AiNodeContext, ProviderId, AiToolCall } from '../types/ai';
 import { executeToolCall } from './ai/toolExecutor';
 import type { OcrWord } from '../core/extraction/ocrExtractor';
+import type { TableSelection } from '../core/extraction/tableMaterializer';
 
 const API_URL = '/api/ai/chat';
 
@@ -235,6 +236,169 @@ export async function detectFieldsWithAI(
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`Failed to parse AI response as field data: ${msg}`);
   }
+}
+
+export interface DetectTableOptions {
+  images?: Array<{ mimeType: string; base64: string }>;
+  ocrWords?: OcrWord[];
+  /** Pixel dimensions of the OCR crop. Used to normalize word boxes correctly. */
+  imageWidth?: number;
+  imageHeight?: number;
+  /** Optional bbox hint in normalized 0-1 page coords (user-drawn region). */
+  hintBbox?: { x0: number; y0: number; x1: number; y1: number };
+}
+
+function extractJsonObject(content: string): Record<string, unknown> {
+  const tryParse = (s: string): Record<string, unknown> | null => {
+    try {
+      const v = JSON.parse(s);
+      return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  };
+  let parsed = tryParse(content.trim());
+  if (parsed) return parsed;
+  const fence = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fence) {
+    parsed = tryParse(fence[1].trim());
+    if (parsed) return parsed;
+  }
+  const start = content.indexOf('{');
+  const end = content.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    parsed = tryParse(content.slice(start, end + 1));
+    if (parsed) return parsed;
+  }
+  throw new Error('No JSON object found in AI response');
+}
+
+function validateTableSelection(raw: Record<string, unknown>): TableSelection {
+  const bbox = raw.bbox as Record<string, number> | undefined;
+  const colXs = raw.colXs as number[] | undefined;
+  const rowYs = raw.rowYs as number[] | undefined;
+  if (!bbox || typeof bbox.x0 !== 'number') throw new Error('Missing bbox');
+  if (!Array.isArray(colXs) || !Array.isArray(rowYs)) throw new Error('Missing colXs/rowYs');
+  const headerRowIndex = typeof raw.headerRowIndex === 'number' ? raw.headerRowIndex : undefined;
+  return {
+    bbox: { x0: bbox.x0, y0: bbox.y0, x1: bbox.x1, y1: bbox.y1 },
+    colXs: [...colXs].sort((a, b) => a - b),
+    rowYs: [...rowYs].sort((a, b) => a - b),
+    headerRowIndex,
+  };
+}
+
+export async function detectTableWithAI(
+  options: DetectTableOptions,
+  provider: ProviderId,
+  model: string,
+  apiKey: string,
+): Promise<TableSelection> {
+  const { images, ocrWords, hintBbox, imageWidth, imageHeight } = options;
+
+  let userContent = 'Detect the spatial layout of the table in this image. The image IS the table region — return colXs and rowYs as fractions (0-1) of THIS image (its full pixel width/height, edge to edge). Return ONLY the JSON object with bbox, rowYs, colXs, headerRowIndex. Do NOT include cell text.\n\nIMPORTANT: Bank-statement tables typically have a leading DATE column even though dates are short and visually compact. Make sure to put a colXs entry between the date column and the description column. Aim to capture ALL semantic columns (date, description/details, debit/credit/amount, balance, ref). When in doubt, prefer more columns over fewer.';
+  if (hintBbox) {
+    userContent += `\n\nUser-drawn region (normalized 0-1 of page): ${JSON.stringify(hintBbox)}. Constrain bbox to this region.`;
+  }
+  if (ocrWords?.length) {
+    // Normalize against the actual image dims so the model's output matches the image's
+    // edge-to-edge coordinate space. Falling back to max-of-words causes a right-drift
+    // (since words always end before the right margin).
+    const W = imageWidth && imageWidth > 0 ? imageWidth : ocrWords.reduce((m, w) => Math.max(m, w.bbox.x1), 0) || 1;
+    const H = imageHeight && imageHeight > 0 ? imageHeight : ocrWords.reduce((m, w) => Math.max(m, w.bbox.y1), 0) || 1;
+    const ocrData = ocrWords.map((w) => ({
+      b: [
+        +(w.bbox.x0 / W).toFixed(4),
+        +(w.bbox.y0 / H).toFixed(4),
+        +(w.bbox.x1 / W).toFixed(4),
+        +(w.bbox.y1 / H).toFixed(4),
+      ],
+    }));
+    userContent += `\n\nOCR word boxes [x0,y0,x1,y1] normalized 0-1 of the crop image (image is ${W}x${H} px). Each entry is one OCR'd word's bounding rectangle. Use vertical gaps between word clusters to anchor colXs:\n${JSON.stringify(ocrData)}`;
+  }
+
+  const content = await callAi({
+    provider,
+    model,
+    apiKey,
+    mode: 'detect_table',
+    messages: [{ role: 'user', content: userContent }],
+    images,
+  });
+
+  try {
+    const obj = extractJsonObject(content);
+    return validateTableSelection(obj);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[detectTableWithAI] raw response:', content);
+    throw new Error(`Failed to parse AI response as TableSelection: ${msg}. Raw: ${content.slice(0, 200)}`);
+  }
+}
+
+export interface ExtractTableVisionOptions {
+  images: Array<{ mimeType: string; base64: string }>;
+  /** Optional bbox hint in normalized 0-1 page coords. */
+  hintBbox?: { x0: number; y0: number; x1: number; y1: number };
+}
+
+export interface AiVisionTable {
+  selection: TableSelection;
+  /** Raw cell text in row-major order, including the header row at headerRowIndex. */
+  cells: string[][];
+}
+
+export async function extractTableWithAIVision(
+  options: ExtractTableVisionOptions,
+  provider: ProviderId,
+  model: string,
+  apiKey: string,
+): Promise<AiVisionTable> {
+  const { images, hintBbox } = options;
+
+  let userContent =
+    'Read the table in this image. Return JSON with bbox, colXs, rowYs, headerRowIndex, and cells (M rows x N columns of strings, including the header row). All coordinates are normalized 0-1 of THIS image (edge-to-edge). Read every cell directly from the image — do not hallucinate values, but do read low-quality text faithfully.';
+  if (hintBbox) {
+    userContent += `\n\nUser-drawn region (normalized 0-1 of page): ${JSON.stringify(hintBbox)}.`;
+  }
+
+  const content = await callAi({
+    provider,
+    model,
+    apiKey,
+    mode: 'extract_table',
+    messages: [{ role: 'user', content: userContent }],
+    images,
+  });
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = extractJsonObject(content);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse AI vision table response: ${msg}. Raw: ${content.slice(0, 200)}`);
+  }
+
+  const bbox = parsed.bbox as Record<string, number> | undefined;
+  const colXs = parsed.colXs as number[] | undefined;
+  const rowYs = parsed.rowYs as number[] | undefined;
+  const cells = parsed.cells as string[][] | undefined;
+  if (!bbox || typeof bbox.x0 !== 'number') throw new Error('Missing bbox');
+  if (!Array.isArray(colXs) || !Array.isArray(rowYs)) throw new Error('Missing colXs/rowYs');
+  if (!Array.isArray(cells)) throw new Error('Missing cells');
+
+  const headerRowIndex =
+    typeof parsed.headerRowIndex === 'number' ? parsed.headerRowIndex : undefined;
+
+  return {
+    selection: {
+      bbox: { x0: bbox.x0, y0: bbox.y0, x1: bbox.x1, y1: bbox.y1 },
+      colXs: [...colXs].sort((a, b) => a - b),
+      rowYs: [...rowYs].sort((a, b) => a - b),
+      headerRowIndex,
+    },
+    cells: cells.map((row) => (Array.isArray(row) ? row.map((c) => String(c ?? '')) : [])),
+  };
 }
 
 export interface AskAIOptions {

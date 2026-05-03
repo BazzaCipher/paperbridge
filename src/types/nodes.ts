@@ -8,7 +8,7 @@
 import type { Node } from '@xyflow/react';
 import type { DataValue, SimpleDataType } from './data';
 import type { DataSourceReference } from './geometry';
-import type { ExtractedRegion } from './regions';
+import type { ExtractedRegion, ExtractorColumn, TableRecord } from './regions';
 import type { ViewportRegion } from './viewport';
 import type { DocumentView } from './view';
 import type { FileNodeData, Exportable, Importable } from './categories';
@@ -17,7 +17,7 @@ import type { FileNodeData, Exportable, Importable } from './categories';
 // NODE TYPE IDENTIFIERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export type LynkNodeType = 'display' | 'extractor' | 'calculation' | 'sheet' | 'label' | 'group' | 'viewport';
+export type LynkNodeType = 'display' | 'extractor' | 'calculation' | 'sheet' | 'label' | 'group' | 'viewport' | 'match';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // BASE NODE DATA
@@ -97,6 +97,15 @@ export interface ExtractorNodeData extends BaseNodeData, FileNodeData, Exportabl
   regions: ExtractedRegion[];
   currentPage: number;
   totalPages: number;
+  /** Materialized table records produced via 'table' selection mode. */
+  tables?: TableRecord[];
+  /** User-defined ledger columns. If omitted, defaults are applied at render time. */
+  columns?: ExtractorColumn[];
+  /**
+   * TxnGroup ids for one-row groups created via the Single mode flow.
+   * Each Single capture appends a new id; deletes splice it out.
+   */
+  singleTxnGroupIds?: string[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -233,6 +242,46 @@ export interface GroupNodeData extends BaseNodeData {
   backgroundColor?: string;
   /** Whether the group is collapsed (children hidden) */
   collapsed?: boolean;
+  /**
+   * When collapsed, points to an aggregated TxnGroup in `txnGroupSlice` that
+   * concatenates all child TxnGroups. Cleared on expand.
+   */
+  aggregatedTxnGroupId?: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MATCH NODE (reconciliation between two sources)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Match node data - reconciliation between two connected TxnGroup sources.
+ * On-canvas: editable label + count chip + "Open" button. The Studio overlay
+ * does the actual reconciliation work.
+ */
+export interface MatchPairRef {
+  /** Transaction id from side A. */
+  aId: string;
+  /** Transaction id from side B. */
+  bId: string;
+  /** Match score from `reconcile()`. */
+  score: number;
+}
+
+export interface MatchNodeData extends BaseNodeData, Importable, Exportable {
+  /** Absolute amount tolerance, e.g. 0.05. */
+  amountTolerance: number;
+  /** Day window for date matching, e.g. 7. */
+  dateWindowDays: number;
+  /** Auto-matched pairs (re-derived on Auto). */
+  pairs: MatchPairRef[];
+  /** Transaction ids unmatched on side A (top). */
+  unmatchedA: string[];
+  /** Transaction ids unmatched on side B (bottom). */
+  unmatchedB: string[];
+  /** User-locked manual matches; never auto-overridden. */
+  manualOverrides: Array<{ aId: string; bId: string }>;
+  /** User-rejected pairs; never re-proposed. */
+  rejections: Array<{ aId: string; bId: string }>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -247,7 +296,8 @@ export type LynkNodeData =
   | CalculationNodeData
   | SheetNodeData
   | LabelNodeData
-  | GroupNodeData;
+  | GroupNodeData
+  | MatchNodeData;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // REACT FLOW NODE TYPES
@@ -261,9 +311,10 @@ export type CalculationNode = Node<CalculationNodeData, 'calculation'>;
 export type SheetNode = Node<SheetNodeData, 'sheet'>;
 export type LabelNode = Node<LabelNodeData, 'label'>;
 export type GroupNode = Node<GroupNodeData, 'group'>;
+export type MatchNode = Node<MatchNodeData, 'match'>;
 
 /** Union type for all node types */
-export type LynkNode = DisplayNode | ViewportNode | ExtractorNode | CalculationNode | SheetNode | LabelNode | GroupNode;
+export type LynkNode = DisplayNode | ViewportNode | ExtractorNode | CalculationNode | SheetNode | LabelNode | GroupNode | MatchNode;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPE GUARDS (runtime type checking)
@@ -309,4 +360,10 @@ export const LabelNode = {
 export const GroupNode = {
   type: 'group' as const,
   is: (node: LynkNode): node is GroupNode => node.type === 'group',
+};
+
+/** Type guard and utilities for MatchNode */
+export const MatchNode = {
+  type: 'match' as const,
+  is: (node: LynkNode): node is MatchNode => node.type === 'match',
 };

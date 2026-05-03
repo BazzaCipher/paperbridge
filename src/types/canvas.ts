@@ -7,6 +7,7 @@
 import type { Edge, Viewport } from '@xyflow/react';
 import type { LynkNode } from './nodes';
 import type { VirtualFolder } from '../store/canvasPersistence';
+import type { TxnGroup } from '../core/sources/txnGroup';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CANVAS METADATA
@@ -35,4 +36,7 @@ export interface CanvasState {
   embedded?: Record<string, unknown>;
   /** Virtual folder hierarchy for file organization */
   virtualFolders?: VirtualFolder[];
+  /** TxnGroup payloads keyed by id; referenced from node data via
+   *  `txnGroupId` / `tables[].txnGroupId`. */
+  txnGroups?: Record<string, TxnGroup>;
 }

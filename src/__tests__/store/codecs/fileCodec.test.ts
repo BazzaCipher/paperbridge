@@ -43,7 +43,7 @@ describe('FileCodec', () => {
       const { fileId } = BlobRegistry.register(blob);
       BlobRegistry.metadata.set(fileId, {
         fileId, fileName: 'test.pdf', mimeType: 'application/pdf',
-        size: 12, fileType: 'pdf', contentHash: 'abc', registeredAt: 0, nodeIds: new Set(),
+        size: 12, fileType: 'pdf', contentHash: 'abc', registeredAt: 0, nodeIds: new Set(), canvasId: 'c1',
       });
 
       const canvas: CanvasState = {

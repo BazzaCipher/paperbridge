@@ -87,8 +87,9 @@ export const createFileRegistrySlice: StateCreator<FileRegistrySlice> = (set, ge
     };
     collect(folderId);
 
-    // Unassign files in deleted folders
-    for (const meta of BlobRegistry.getAllMetadata()) {
+    // Unassign files in deleted folders (current canvas only)
+    const canvasId = get().canvasId;
+    for (const meta of BlobRegistry.getAllMetadata(canvasId)) {
       if (meta.folderId && toDelete.has(meta.folderId)) {
         meta.folderId = undefined;
       }
@@ -110,13 +111,13 @@ export const createFileRegistrySlice: StateCreator<FileRegistrySlice> = (set, ge
 
   getRegisteredFiles: () => {
     get()._fileRegistryVersion;
-    return BlobRegistry.getAllMetadata();
+    return BlobRegistry.getAllMetadata(get().canvasId);
   },
 
   getSortedFilteredFiles: () => {
     get()._fileRegistryVersion;
-    const { fileRegistrySort, fileRegistrySearch } = get();
-    let files = BlobRegistry.getAllMetadata();
+    const { fileRegistrySort, fileRegistrySearch, canvasId } = get();
+    let files = BlobRegistry.getAllMetadata(canvasId);
 
     if (fileRegistrySearch) {
       const search = fileRegistrySearch.toLowerCase();
@@ -145,7 +146,7 @@ export const createFileRegistrySlice: StateCreator<FileRegistrySlice> = (set, ge
 
   getDuplicateGroups: () => {
     get()._fileRegistryVersion;
-    const files = BlobRegistry.getAllMetadata();
+    const files = BlobRegistry.getAllMetadata(get().canvasId);
     const hashMap = new Map<string, FileMetadata[]>();
 
     for (const file of files) {

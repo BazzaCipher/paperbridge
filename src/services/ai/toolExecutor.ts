@@ -161,7 +161,8 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   async get_file_list() {
-    const files = BlobRegistry.getAllMetadata().map((m) => ({
+    const { canvasId } = useCanvasStore.getState();
+    const files = BlobRegistry.getAllMetadata(canvasId).map((m) => ({
       fileId: m.fileId,
       fileName: m.fileName,
       mimeType: m.mimeType,

@@ -1,5 +1,4 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { useDocumentZoom } from '../../hooks/useDocumentZoom';
 import type { NodeProps } from '@xyflow/react';
 import { useEdges, useReactFlow } from '@xyflow/react';
 import { BaseNode } from './base/BaseNode';
@@ -8,12 +7,11 @@ import { RegionSelector } from './file/RegionSelector';
 import { HighlightOverlay } from './file/HighlightOverlay';
 import { ViewportList } from './file/ViewportList';
 import { FileNodePreview } from './file/FileNodePreview';
-import { Modal } from '../ui/Modal';
-import { ZoomControls } from '../ui/ZoomControls';
+import { DocumentModal } from './file/DocumentModal';
 import { CollapsiblePanel } from '../ui/CollapsiblePanel';
 import { FileDropZone } from '../ui/FileDropZone';
 import { useCanvasStore } from '../../store/canvasStore';
-import { useFileNode } from '../../hooks/useFileNode';
+import { useFileNodeState } from '../../hooks/useFileNodeState';
 import { useNodeOutputs } from '../../hooks/useNodeOutputs';
 import { useSyncNodeOutputs } from '../../hooks/useSyncNodeOutputs';
 import { BlobRegistry } from '../../store/canvasPersistence';
@@ -43,14 +41,7 @@ export function DisplayNode({ id, data, selected }: NodeProps<DisplayNodeType>) 
   const { getNode } = useReactFlow();
   const nodeOutputs = useNodeOutputs(id);
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
-  const viewerAreaRef = useRef<HTMLDivElement>(null);
   const [selectedViewportId, setSelectedViewportId] = useState<string | null>(null);
-  const [, setViewerHeight] = useState(400);
-  const [pdfError, setPdfError] = useState<string | null>(null);
-  const [pageOffsets, setPageOffsets] = useState<Map<number, number>>(new Map());
-  const { zoom, zoomIn, zoomOut, resetZoom } = useDocumentZoom(viewerAreaRef, isModalOpen);
   const [singlePageSize, setSinglePageSize] = useState<{ width: number; height: number } | null>(null);
 
   // Get current page number from view target
@@ -139,21 +130,28 @@ export function DisplayNode({ id, data, selected }: NodeProps<DisplayNodeType>) 
     [id, updateNodeData]
   );
 
-  const { handleFileSelect, handleFileDrop, handleDragOver, handlePickFromRegistry } = useFileNode(id, handleFileInit);
-
-  // ── PDF handling ──────────────────────────────────────────────────────────
-  const handlePdfLoad = useCallback(
-    ({ numPages }: { numPages: number }) => {
-      updateNodeData(id, { totalPages: numPages });
-      setPdfError(null);
-    },
-    [id, updateNodeData]
-  );
-
-  const handlePdfError = useCallback((error: Error) => {
-    console.error('PDF load error:', error);
-    setPdfError('Failed to load PDF');
-  }, []);
+  const {
+    viewerAreaRef,
+    isModalOpen,
+    openModal,
+    closeModal,
+    isPickerOpen,
+    openPicker,
+    closePicker,
+    zoom,
+    zoomIn,
+    zoomOut,
+    resetZoom,
+    pdfError,
+    handlePdfLoad,
+    handlePdfError,
+    pageOffsets,
+    setPageOffsets,
+    handleFileSelect,
+    handleFileDrop,
+    handleDragOver,
+    handlePickFromRegistry,
+  } = useFileNodeState(id, handleFileInit);
 
   const handleModalPageChange = useCallback(
     (page: number) => {
@@ -170,7 +168,6 @@ export function DisplayNode({ id, data, selected }: NodeProps<DisplayNodeType>) 
   const handleDocumentLoad = useCallback(
     (numPages: number) => {
       updateNodeData(id, { totalPages: numPages });
-      setViewerHeight(VIEWER_WIDTH * 1.4);
     },
     [id, updateNodeData]
   );
@@ -196,7 +193,6 @@ export function DisplayNode({ id, data, selected }: NodeProps<DisplayNodeType>) 
   const handleContentResize = useCallback(
     (width: number, height: number) => {
       viewerContainerRef.current = { width, height };
-      setViewerHeight(height);
       // For images (non-scroll), still track total content size
       if (data.fileType === 'image' && (!data.documentSize || data.documentSize.width !== width || data.documentSize.height !== height)) {
         updateNodeData(id, { documentSize: { width, height } });
@@ -323,16 +319,6 @@ export function DisplayNode({ id, data, selected }: NodeProps<DisplayNodeType>) 
     [id, viewports, updateNodeData]
   );
 
-  // ── Modal ─────────────────────────────────────────────────────────────────
-  const openModal = useCallback(() => {
-    setIsModalOpen(true);
-  }, []);
-
-  const closeModal = useCallback(() => {
-    setIsModalOpen(false);
-    resetZoom();
-  }, [resetZoom]);
-
   // ── Convert to ExtractorNode ──────────────────────────────────────────────
   const convertToExtractor = useCallback(() => {
     const extractorCurrentPage = data.view.target.type === 'page'
@@ -386,13 +372,13 @@ export function DisplayNode({ id, data, selected }: NodeProps<DisplayNodeType>) 
               onDrop={handleFileDrop}
               onDragOver={handleDragOver}
               compact
-              onPickFromRegistry={() => setIsPickerOpen(true)}
+              onPickFromRegistry={openPicker}
             />
           </div>
         </BaseNode>
         <FilePickerModal
           isOpen={isPickerOpen}
-          onClose={() => setIsPickerOpen(false)}
+          onClose={closePicker}
           onSelect={handlePickFromRegistry}
         />
       </>
@@ -440,90 +426,25 @@ export function DisplayNode({ id, data, selected }: NodeProps<DisplayNodeType>) 
         />
       </BaseNode>
 
-      {/* Document viewer modal with region selector */}
-      <Modal
+      <DocumentModal
         isOpen={isModalOpen}
         onClose={closeModal}
         title={data.fileName || 'Document Viewer'}
-        className="w-[950px] max-w-[95vw]"
-      >
-        <div className="flex h-[75vh]">
-          {/* Document viewer area */}
-          <div
-            className="flex-1 overflow-auto bg-paper-50"
-            ref={viewerAreaRef}
-            onDoubleClick={(e) => e.stopPropagation()}
-          >
-            {/* Instruction bar */}
-            <div className="sticky top-0 z-10 flex items-center gap-2 py-2 px-4 bg-white border-b border-paper-200 shadow-sm">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-copper-500" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm0 2h10v10H5V5z" />
-              </svg>
-              <span className="text-xs text-bridge-600">
-                Draw a box to create a viewport region
-              </span>
-              <div className="flex-1" />
-              <ZoomControls zoom={zoom} onZoomIn={zoomIn} onZoomOut={zoomOut} onReset={resetZoom} />
-            </div>
-
-            {/* Document with overlays - CSS transform zoom */}
-            <div className="relative p-6 flex justify-center">
-              <div
-                className="relative bg-white shadow-lg"
-                style={{
-                  transform: `scale(${zoom})`,
-                  transformOrigin: 'top center',
-                }}
-              >
-                <DocumentViewer
-                  fileUrl={data.fileUrl ?? null}
-                  fileType={data.fileType}
-                  currentPage={currentPage}
-                  totalPages={data.totalPages}
-                  onPageChange={handleModalPageChange}
-                  onDocumentLoad={handleDocumentLoad}
-                  onContentResize={handleContentResize}
-                  onPageOffsetsChange={setPageOffsets}
-                  onSinglePageSize={handleSinglePageSize}
-                  enableTextSelection={false}
-                  width={VIEWER_WIDTH}
-                  devicePixelRatio={Math.max(window.devicePixelRatio, zoom) * window.devicePixelRatio}
-                  scrollMode={true}
-                >
-                  {/* Viewport overlays (reusing HighlightOverlay) */}
-                  {data.fileUrl && (
-                    <HighlightOverlay
-                      regions={viewportAsRegions}
-                      currentPage={currentPage}
-                      selectedRegionId={selectedViewportId}
-                      onRegionSelect={handleViewportSelect}
-                      interactive
-                      nodeId={id}
-                      scrollMode={true}
-                      pageOffsets={pageOffsets}
-                    />
-                  )}
-                  {/* Box selection for creating viewports */}
-                  {data.fileUrl && (
-                    <RegionSelector
-                      onRegionCreate={handleViewportCreate}
-                      documentRef={viewerAreaRef}
-                      pageOffsets={pageOffsets}
-                      zoom={zoom}
-                    />
-                  )}
-                </DocumentViewer>
-              </div>
-            </div>
-          </div>
-
-          {/* Collapsible viewports panel */}
-          <CollapsiblePanel
-            title="Viewports"
-            badge={viewports.length}
-            defaultOpen={true}
-            side="right"
-          >
+        viewerAreaRef={viewerAreaRef}
+        zoom={zoom}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onResetZoom={resetZoom}
+        toolbar={
+          <>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-copper-500" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm0 2h10v10H5V5z" />
+            </svg>
+            <span className="text-xs text-bridge-600">Draw a box to create a viewport region</span>
+          </>
+        }
+        panel={
+          <CollapsiblePanel title="Viewports" badge={viewports.length} defaultOpen={true} side="right">
             <ViewportList
               viewports={viewports}
               selectedViewportId={selectedViewportId}
@@ -533,18 +454,60 @@ export function DisplayNode({ id, data, selected }: NodeProps<DisplayNodeType>) 
               nodeId={id}
             />
           </CollapsiblePanel>
+        }
+        footer={
+          <div className="px-4 py-2 bg-paper-100 border-t border-paper-200 text-xs text-bridge-500 flex items-center justify-between">
+            <span>Draw a box on the document to create a viewport. Each viewport spawns a connected node.</span>
+            <span className="text-bridge-400">
+              {viewports.length} viewport{viewports.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        }
+      >
+        <div className="relative p-6 flex justify-center">
+          <div
+            className="relative bg-white shadow-lg"
+            style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
+          >
+            <DocumentViewer
+              fileUrl={data.fileUrl ?? null}
+              fileType={data.fileType}
+              currentPage={currentPage}
+              totalPages={data.totalPages}
+              onPageChange={handleModalPageChange}
+              onDocumentLoad={handleDocumentLoad}
+              onContentResize={handleContentResize}
+              onPageOffsetsChange={setPageOffsets}
+              onSinglePageSize={handleSinglePageSize}
+              enableTextSelection={false}
+              width={VIEWER_WIDTH}
+              devicePixelRatio={Math.max(window.devicePixelRatio, zoom) * window.devicePixelRatio}
+              scrollMode={true}
+            >
+              {data.fileUrl && (
+                <HighlightOverlay
+                  regions={viewportAsRegions}
+                  currentPage={currentPage}
+                  selectedRegionId={selectedViewportId}
+                  onRegionSelect={handleViewportSelect}
+                  interactive
+                  nodeId={id}
+                  scrollMode={true}
+                  pageOffsets={pageOffsets}
+                />
+              )}
+              {data.fileUrl && (
+                <RegionSelector
+                  onRegionCreate={handleViewportCreate}
+                  documentRef={viewerAreaRef}
+                  pageOffsets={pageOffsets}
+                  zoom={zoom}
+                />
+              )}
+            </DocumentViewer>
+          </div>
         </div>
-
-        {/* Footer */}
-        <div className="px-4 py-2 bg-paper-100 border-t border-paper-200 text-xs text-bridge-500 flex items-center justify-between">
-          <span>
-            Draw a box on the document to create a viewport. Each viewport spawns a connected node.
-          </span>
-          <span className="text-bridge-400">
-            {viewports.length} viewport{viewports.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-      </Modal>
+      </DocumentModal>
     </>
   );
 }

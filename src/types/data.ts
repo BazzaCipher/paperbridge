@@ -21,7 +21,7 @@ export type SimpleDataType = 'string' | 'number' | 'boolean' | 'date' | 'currenc
  * Extended data types including complex/aggregate types.
  * Used by DataValue for nested structures.
  */
-export type ExtendedDataType = SimpleDataType | 'array' | 'table';
+export type ExtendedDataType = SimpleDataType | 'array' | 'table' | 'txngroup';
 
 /**
  * Legacy type alias - 'text' maps to 'string'.

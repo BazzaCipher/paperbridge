@@ -7,6 +7,7 @@
 import type { CanvasState } from '../../types';
 import type { ValidationResult, ExportedCanvas } from '../codecs';
 import * as persistenceService from '../../services/canvasPersistence';
+import { BlobRegistry } from '../canvasPersistence';
 import { filterValidEdges } from '../../services/canvasValidation';
 import { generateId } from '../../utils/id';
 import type { StateCreator } from './types';
@@ -34,6 +35,8 @@ export const createPersistenceSlice: StateCreator<PersistenceSlice> = (set, get)
   lastSaved: null,
 
   clearCanvas: () => {
+    const oldCanvasId = get().canvasId;
+    BlobRegistry.removeCanvasFiles(oldCanvasId);
     set({
       nodes: [],
       edges: [],
@@ -42,6 +45,7 @@ export const createPersistenceSlice: StateCreator<PersistenceSlice> = (set, get)
       canvasId: generateCanvasId(),
       lastSaved: null,
       virtualFolders: [],
+      txnGroups: {},
     });
     resetNodeIdCounter();
   },
@@ -49,8 +53,8 @@ export const createPersistenceSlice: StateCreator<PersistenceSlice> = (set, get)
   setCanvasName: (name) => set({ canvasName: name }),
 
   exportCanvas: () => {
-    const { nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders } = get();
-    return persistenceService.exportCanvas({ nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders });
+    const { nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders, txnGroups } = get();
+    return persistenceService.exportCanvas({ nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders, txnGroups });
   },
 
   importCanvas: (state) => {
@@ -67,6 +71,7 @@ export const createPersistenceSlice: StateCreator<PersistenceSlice> = (set, get)
       canvasId: result.data.canvasId,
       lastSaved: result.data.lastSaved,
       virtualFolders: result.data.virtualFolders || [],
+      txnGroups: result.data.txnGroups || {},
       highlightedHandle: null,
     });
 
@@ -82,13 +87,13 @@ export const createPersistenceSlice: StateCreator<PersistenceSlice> = (set, get)
   },
 
   validateCanvas: () => {
-    const { nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders } = get();
-    return persistenceService.validateCanvas({ nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders });
+    const { nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders, txnGroups } = get();
+    return persistenceService.validateCanvas({ nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders, txnGroups });
   },
 
   saveToFile: async () => {
-    const { nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders } = get();
-    const result = await persistenceService.saveToFile({ nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders });
+    const { nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders, txnGroups } = get();
+    const result = await persistenceService.saveToFile({ nodes, edges, viewport, canvasName, canvasId, lastSaved, virtualFolders, txnGroups });
     if (result.success) {
       set({ lastSaved: new Date().toISOString() });
     }
@@ -109,6 +114,7 @@ export const createPersistenceSlice: StateCreator<PersistenceSlice> = (set, get)
       canvasId: result.data.canvasId,
       lastSaved: result.data.lastSaved,
       virtualFolders: result.data.virtualFolders || [],
+      txnGroups: result.data.txnGroups || {},
       highlightedHandle: null,
     });
 

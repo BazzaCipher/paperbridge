@@ -232,6 +232,7 @@ export const FileCodec: CanvasCodec<FileEmbeddedData> = {
           registeredAt: Date.now(),
           nodeIds: new Set<string>(),
           folderId: file.folderId,
+          canvasId: canvas.metadata.id,
         });
       } catch (err) {
         warnings.push(`Failed to extract file ${fileId}: ${err instanceof Error ? err.message : 'Unknown error'}`);

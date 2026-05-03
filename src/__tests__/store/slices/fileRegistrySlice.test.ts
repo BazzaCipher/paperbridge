@@ -110,7 +110,7 @@ describe('createFileRegistrySlice', () => {
       fileType: 'pdf',
       contentHash: 'abc',
       registeredAt: Date.now(),
-      nodeIds: new Set(),
+      nodeIds: new Set(), canvasId: 'c1',
     });
     const files = store.getRegisteredFiles();
     expect(files).toHaveLength(1);
@@ -122,11 +122,11 @@ describe('createFileRegistrySlice', () => {
     const now = Date.now();
     BlobRegistry.metadata.set('f1', {
       fileId: 'f1', fileName: 'invoice.pdf', mimeType: 'application/pdf',
-      size: 1000, fileType: 'pdf', contentHash: 'a', registeredAt: now, nodeIds: new Set(),
+      size: 1000, fileType: 'pdf', contentHash: 'a', registeredAt: now, nodeIds: new Set(), canvasId: 'c1',
     });
     BlobRegistry.metadata.set('f2', {
       fileId: 'f2', fileName: 'receipt.png', mimeType: 'image/png',
-      size: 500, fileType: 'image', contentHash: 'b', registeredAt: now + 1, nodeIds: new Set(),
+      size: 500, fileType: 'image', contentHash: 'b', registeredAt: now + 1, nodeIds: new Set(), canvasId: 'c1',
     });
     store.setFileRegistrySearch('invoice');
     const files = store.getSortedFilteredFiles();
@@ -139,11 +139,11 @@ describe('createFileRegistrySlice', () => {
     const now = Date.now();
     BlobRegistry.metadata.set('f1', {
       fileId: 'f1', fileName: 'b.pdf', mimeType: 'application/pdf',
-      size: 1000, fileType: 'pdf', contentHash: 'a', registeredAt: now, nodeIds: new Set(),
+      size: 1000, fileType: 'pdf', contentHash: 'a', registeredAt: now, nodeIds: new Set(), canvasId: 'c1',
     });
     BlobRegistry.metadata.set('f2', {
       fileId: 'f2', fileName: 'a.png', mimeType: 'image/png',
-      size: 500, fileType: 'image', contentHash: 'b', registeredAt: now, nodeIds: new Set(),
+      size: 500, fileType: 'image', contentHash: 'b', registeredAt: now, nodeIds: new Set(), canvasId: 'c1',
     });
     store.setFileRegistrySort('name', 'asc');
     const files = store.getSortedFilteredFiles();
@@ -156,11 +156,11 @@ describe('createFileRegistrySlice', () => {
     const now = Date.now();
     BlobRegistry.metadata.set('f1', {
       fileId: 'f1', fileName: 'big.pdf', mimeType: 'application/pdf',
-      size: 5000, fileType: 'pdf', contentHash: 'a', registeredAt: now, nodeIds: new Set(),
+      size: 5000, fileType: 'pdf', contentHash: 'a', registeredAt: now, nodeIds: new Set(), canvasId: 'c1',
     });
     BlobRegistry.metadata.set('f2', {
       fileId: 'f2', fileName: 'small.png', mimeType: 'image/png',
-      size: 100, fileType: 'image', contentHash: 'b', registeredAt: now, nodeIds: new Set(),
+      size: 100, fileType: 'image', contentHash: 'b', registeredAt: now, nodeIds: new Set(), canvasId: 'c1',
     });
     store.setFileRegistrySort('size', 'asc');
     const files = store.getSortedFilteredFiles();
@@ -172,15 +172,15 @@ describe('createFileRegistrySlice', () => {
     const now = Date.now();
     BlobRegistry.metadata.set('f1', {
       fileId: 'f1', fileName: 'a.pdf', mimeType: 'application/pdf',
-      size: 1000, fileType: 'pdf', contentHash: 'same-hash', registeredAt: now, nodeIds: new Set(),
+      size: 1000, fileType: 'pdf', contentHash: 'same-hash', registeredAt: now, nodeIds: new Set(), canvasId: 'c1',
     });
     BlobRegistry.metadata.set('f2', {
       fileId: 'f2', fileName: 'b.pdf', mimeType: 'application/pdf',
-      size: 1000, fileType: 'pdf', contentHash: 'same-hash', registeredAt: now, nodeIds: new Set(),
+      size: 1000, fileType: 'pdf', contentHash: 'same-hash', registeredAt: now, nodeIds: new Set(), canvasId: 'c1',
     });
     BlobRegistry.metadata.set('f3', {
       fileId: 'f3', fileName: 'c.png', mimeType: 'image/png',
-      size: 500, fileType: 'image', contentHash: 'unique', registeredAt: now, nodeIds: new Set(),
+      size: 500, fileType: 'image', contentHash: 'unique', registeredAt: now, nodeIds: new Set(), canvasId: 'c1',
     });
     const groups = store.getDuplicateGroups();
     expect(groups.size).toBe(1);
@@ -191,7 +191,7 @@ describe('createFileRegistrySlice', () => {
     const store = createStore();
     BlobRegistry.metadata.set('f1', {
       fileId: 'f1', fileName: 'test.pdf', mimeType: 'application/pdf',
-      size: 1000, fileType: 'pdf', contentHash: 'a', registeredAt: Date.now(), nodeIds: new Set(),
+      size: 1000, fileType: 'pdf', contentHash: 'a', registeredAt: Date.now(), nodeIds: new Set(), canvasId: 'c1',
     });
     const folderId = store.createVirtualFolder('Folder');
     store.moveFileToFolder('f1', folderId);
@@ -203,7 +203,7 @@ describe('createFileRegistrySlice', () => {
     const folderId = store.createVirtualFolder('Docs');
     BlobRegistry.metadata.set('f1', {
       fileId: 'f1', fileName: 'test.pdf', mimeType: 'application/pdf',
-      size: 1000, fileType: 'pdf', contentHash: 'a', registeredAt: Date.now(), nodeIds: new Set(),
+      size: 1000, fileType: 'pdf', contentHash: 'a', registeredAt: Date.now(), nodeIds: new Set(), canvasId: 'c1',
       folderId,
     });
     store.deleteVirtualFolder(folderId);
@@ -215,11 +215,11 @@ describe('createFileRegistrySlice', () => {
     const now = Date.now();
     BlobRegistry.metadata.set('f1', {
       fileId: 'f1', fileName: 'a.pdf', mimeType: 'application/pdf',
-      size: 1000, fileType: 'pdf', contentHash: 'a', registeredAt: now, nodeIds: new Set(),
+      size: 1000, fileType: 'pdf', contentHash: 'a', registeredAt: now, nodeIds: new Set(), canvasId: 'c1',
     });
     BlobRegistry.metadata.set('f2', {
       fileId: 'f2', fileName: 'b.png', mimeType: 'image/png',
-      size: 500, fileType: 'image', contentHash: 'b', registeredAt: now, nodeIds: new Set(),
+      size: 500, fileType: 'image', contentHash: 'b', registeredAt: now, nodeIds: new Set(), canvasId: 'c1',
     });
     store.setFileRegistrySort('type', 'asc');
     const files = store.getSortedFilteredFiles();

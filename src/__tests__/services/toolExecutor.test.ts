@@ -30,7 +30,7 @@ vi.stubGlobal('document', {
 // ─── BlobRegistry mock ───────────────────────────────────────────────────────
 const blobMeta = new Map<string, {
   fileId: string; fileName: string; mimeType: string; size: number;
-  fileType: 'pdf' | 'image'; nodeIds: Set<string>;
+  fileType: 'pdf' | 'image'; nodeIds: Set<string>; canvasId: string;
 }>();
 const blobData = new Map<string, Blob>();
 
@@ -99,7 +99,7 @@ function makeBlob(fileId: string, fileType: 'pdf' | 'image' = 'image') {
     mimeType: fileType === 'pdf' ? 'application/pdf' : 'image/png',
     size: 0,
     fileType,
-    nodeIds: new Set(),
+    nodeIds: new Set(), canvasId: 'c1',
   });
   blobData.set(fileId, blob);
 }

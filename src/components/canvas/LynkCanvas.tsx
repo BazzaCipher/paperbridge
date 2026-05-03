@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import {
   ReactFlow,
   Background,
-  Controls,
   useReactFlow,
   type Connection,
   type Edge,
@@ -14,9 +13,9 @@ import '@xyflow/react/dist/style.css';
 
 import { useCanvasStore } from '../../store/canvasStore';
 import { getNodeTypes } from '../../core/nodes/nodeRegistry';
-import { FileControls } from './Toolbar';
+import { TopBar } from './TopBar';
 import { NodeCreationBar } from './NodeCreationBar';
-import { UndoRedoControls } from './UndoRedoControls';
+import { CanvasZoomControls } from './CanvasZoomControls';
 import { PanelToggle } from './PanelToggle';
 import { ConnectionLine } from './ConnectionLine';
 import { LayoutControls } from './LayoutControls';
@@ -154,6 +153,83 @@ export function LynkCanvas() {
       }
     }
   }, [nodes, collapsedGroups, updateNodeData]);
+
+  // Aggregate child TxnGroups onto collapsed group nodes. On collapse, walk
+  // children and concat any `txngroup:` outputs (invoice + bank-table groups)
+  // into a single aggregated TxnGroup keyed by the group id. On expand, drop
+  // the aggregate.
+  const addTxnGroup = useCanvasStore((s) => s.addTxnGroup);
+  const updateTxnGroup = useCanvasStore((s) => s.updateTxnGroup);
+  const removeTxnGroup = useCanvasStore((s) => s.removeTxnGroup);
+  const getTxnGroup = useCanvasStore((s) => s.getTxnGroup);
+  const aggregatedSigRef = useRef<string>('');
+  useEffect(() => {
+    const sigs: string[] = [];
+    for (const groupNode of nodes) {
+      if (!GroupNode.is(groupNode as LynkNode)) continue;
+      const isCollapsed = (groupNode as LynkNode).data?.collapsed ?? false;
+      const groupId = groupNode.id;
+      const persistedId = (groupNode.data as { aggregatedTxnGroupId?: string }).aggregatedTxnGroupId;
+
+      if (!isCollapsed) {
+        if (persistedId) {
+          removeTxnGroup(persistedId);
+          updateNodeData(groupId, { aggregatedTxnGroupId: undefined });
+        }
+        continue;
+      }
+
+      // Collect TxnGroup ids from children.
+      const childTxnGroupIds: string[] = [];
+      const childNodeIds: string[] = [];
+      for (const child of nodes) {
+        if (child.parentId !== groupId) continue;
+        childNodeIds.push(child.id);
+        const cd = child.data as { singleTxnGroupIds?: string[]; tables?: Array<{ txnGroupId?: string }>; aggregatedTxnGroupId?: string };
+        for (const gid of cd.singleTxnGroupIds ?? []) childTxnGroupIds.push(gid);
+        if (cd.aggregatedTxnGroupId) childTxnGroupIds.push(cd.aggregatedTxnGroupId);
+        for (const t of cd.tables ?? []) {
+          if (t.txnGroupId) childTxnGroupIds.push(t.txnGroupId);
+        }
+      }
+
+      if (childTxnGroupIds.length === 0) {
+        if (persistedId) {
+          removeTxnGroup(persistedId);
+          updateNodeData(groupId, { aggregatedTxnGroupId: undefined });
+        }
+        continue;
+      }
+
+      const allTxns = [];
+      for (const tgId of childTxnGroupIds) {
+        const tg = getTxnGroup(tgId);
+        if (!tg) continue;
+        allTxns.push(...tg.transactions);
+      }
+
+      sigs.push(`${groupId}:${childTxnGroupIds.join(',')}:${allTxns.length}`);
+
+      const aggregated = {
+        id: persistedId ?? '',
+        label: (groupNode.data as { label?: string }).label || 'Group',
+        transactions: allTxns,
+        origin: {
+          kind: 'aggregated' as const,
+          nodeIds: childNodeIds,
+          extractedAt: new Date().toISOString(),
+        },
+      };
+
+      if (persistedId && getTxnGroup(persistedId)) {
+        updateTxnGroup(persistedId, { ...aggregated, id: persistedId });
+      } else {
+        const newId = addTxnGroup(aggregated);
+        updateNodeData(groupId, { aggregatedTxnGroupId: newId });
+      }
+    }
+    aggregatedSigRef.current = sigs.join('|');
+  }, [nodes, addTxnGroup, updateTxnGroup, removeTxnGroup, getTxnGroup, updateNodeData]);
 
   const { magneticMode, snapTarget, toggleMagneticMode, onNodeDrag, onNodeDragStop } = useMagneticConnect();
 
@@ -499,6 +575,17 @@ export function LynkCanvas() {
 
   return (
     <div className="w-full h-full flex flex-col">
+    {/* Top center: unified chrome bar — fixed to viewport so side panels don't shift it */}
+    <div className="pointer-events-none fixed top-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 max-w-[calc(100vw-6rem)]">
+      <div className="pointer-events-auto">
+        <TopBar focusName={focusNameInput} onFocusNameHandled={clearFocusName} />
+      </div>
+      {nodes.length > 0 && (
+        <div className="pointer-events-auto">
+          <SuggestionBar />
+        </div>
+      )}
+    </div>
     <div className="flex flex-1 min-h-0">
       <ProjectSidebar
         open={sidebarOpen}
@@ -523,18 +610,6 @@ export function LynkCanvas() {
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
       >
-        {/* Top center: File controls + Undo/Redo */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 max-w-[calc(100vw-6rem)]">
-          <div className="flex items-center gap-2">
-            <FileControls
-              focusName={focusNameInput}
-              onFocusNameHandled={clearFocusName}
-            />
-            <UndoRedoControls />
-          </div>
-          {nodes.length > 0 && <SuggestionBar />}
-        </div>
-
         {/* Left: Projects panel toggle */}
         <PanelToggle
           side="left"
@@ -594,7 +669,7 @@ export function LynkCanvas() {
           maxZoom={4}
         >
           <Background gap={16} size={1} />
-          <Controls />
+          <CanvasZoomControls />
           <LayoutControls />
         </ReactFlow>
         {isDragOver && (

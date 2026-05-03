@@ -31,7 +31,7 @@ interface ChatRequestBody {
   provider: string;
   model: string;
   apiKey: string;
-  mode: 'detect_fields' | 'freeform' | 'auto_connect' | 'summarise';
+  mode: 'detect_fields' | 'detect_table' | 'extract_table' | 'freeform' | 'auto_connect' | 'summarise';
   ocrText?: string;
   nodesContext?: Array<{
     nodeId: string;
@@ -163,6 +163,65 @@ When OCR word data with bounding boxes is provided:
 5. Use word confidence scores to inform your field-level confidence
 
 Be thorough — extract ALL identifiable fields including line items in tables, dates, amounts, names, addresses, reference numbers, payment terms, and any labeled key-value pairs. For tables, extract each row as separate line_item entries.`;
+
+const TABLE_DETECTION_SYSTEM_PROMPT = `You are a table layout analyzer. You receive a document image (and optional OCR words) containing a table. Return ONLY the SPATIAL layout of the table — DO NOT emit any cell text.
+
+Output strictly this JSON shape:
+{
+  "bbox": { "x0": number, "y0": number, "x1": number, "y1": number },
+  "rowYs": number[],
+  "colXs": number[],
+  "headerRowIndex": number | null
+}
+
+All coordinates are normalized 0-1 of the page (x: left=0, right=1; y: top=0, bottom=1).
+- bbox: tight rectangle covering the table.
+- colXs: between-column vertical separators inside bbox, sorted ascending. N columns => N-1 entries.
+- rowYs: between-row horizontal separators inside bbox, sorted ascending. N rows => N-1 entries.
+- headerRowIndex: zero-based index of the header row in the resulting rows (typically 0), or null if no header.
+
+Rules:
+- Do NOT include cell text. Only spatial separators.
+- Separators must be strictly inside bbox (not at the edges).
+- Exclude page margins, page numbers, and footers from bbox.
+
+Return ONLY the JSON object, no prose.`;
+
+const TABLE_EXTRACTION_SYSTEM_PROMPT = `You are a table extraction engine. You receive a document image (typically a bank statement table) and must read every cell directly from the image, using your visual understanding rather than relying on any provided OCR.
+
+Output strictly this JSON shape:
+{
+  "bbox": { "x0": number, "y0": number, "x1": number, "y1": number },
+  "rowYs": number[],
+  "colXs": number[],
+  "headerRowIndex": number | null,
+  "cells": string[][]
+}
+
+Coordinates are normalized 0-1 of the input image (x: left=0, right=1; y: top=0, bottom=1).
+- bbox: tight rectangle around the table.
+- colXs: between-column separators (N columns => N-1 entries), sorted.
+- rowYs: between-row separators (M rows => M-1 entries), sorted.
+- headerRowIndex: zero-based row index of the header row, or null.
+- cells: M rows x N columns of strings. Row order matches rowYs (top-to-bottom). Column order matches colXs (left-to-right). INCLUDE the header row at headerRowIndex.
+
+Rules:
+- Read the text from the IMAGE. The OCR may be garbled — trust your visual reading over any provided text.
+- Bank statements typically have columns: Date, Particulars/Description, Debit, Credit, Balance. Capture all of them.
+- Preserve numeric formatting (commas, decimals, signs, parens for negatives, trailing CR/DR).
+- Empty cells are "" (empty string), not null.
+- Every row must have exactly colXs.length+1 cells.
+- Exclude page margins, page numbers, footers from bbox.
+
+Row grouping — IMPORTANT for bank statements:
+- Emit ONE row per LOGICAL transaction, not one row per visual line. A single transaction commonly spans 2-5 visual lines (e.g. "Internet Transfer" / "X Li12345" / "Ref ABC" / "20.00").
+- A new logical row starts when EITHER a new date appears in the Date column, OR a new amount appears in the Debit/Credit column with no prior amount on the current logical row.
+- Continuation lines (no date, no debit, no credit) belong to the prior logical row — JOIN their description text into the prior row's Particulars cell, separated by " " or "\n".
+- rowYs separators must align with these LOGICAL row boundaries, not every visual line. So if 3 visual lines belong to one transaction, do NOT put rowYs separators between them.
+- The opening "Brought forward" line and closing balance line each count as their own logical row.
+- Informational notices that have a date but no money (e.g. "Interest Rate Brought Forward Is 0.11%", "Statement period:", account closure messages) are their own logical row — DO NOT merge them with the next transaction. They belong on their own line with empty Debit/Credit/Balance.
+
+Return ONLY the JSON object, no prose.`;
 
 const FREEFORM_SYSTEM_PROMPT = `You are a helpful assistant for a document processing application called Paper Bridge. You help users understand their document data and set up extraction fields on their documents.
 
@@ -332,6 +391,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const systemPromptMap: Record<string, string> = {
     detect_fields: FIELD_DETECTION_SYSTEM_PROMPT,
+    detect_table: TABLE_DETECTION_SYSTEM_PROMPT,
+    extract_table: TABLE_EXTRACTION_SYSTEM_PROMPT,
     freeform: FREEFORM_SYSTEM_PROMPT,
     auto_connect: AUTO_CONNECT_SYSTEM_PROMPT,
     summarise: SUMMARISE_SYSTEM_PROMPT,
@@ -396,6 +457,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       res.write('data: [DONE]\n\n');
       return res.end();
+    }
+
+    // Plain-text JSON for both table modes. experimental_output (strict
+    // schema) intermittently throws "No output generated" on Gemini even for
+    // small responses. The client parses loose JSON via extractJsonObject and
+    // validates shape itself, so we don't need server-side schema validation.
+    if (mode === 'detect_table' || mode === 'extract_table') {
+      const out = await generateText({
+        model: resolvedModel,
+        system,
+        messages: modelMessages,
+        maxOutputTokens: mode === 'extract_table' ? 32768 : 4096,
+      });
+      const text = out.text ?? '';
+      if (!text.trim()) {
+        return res.status(502).json({
+          error: 'AI returned empty response. The image may be too large or the model timed out — try cropping the table tighter and retry.',
+        });
+      }
+      return res.status(200).json({ content: text, toolCalls: undefined });
     }
 
     // Non-streaming response — detect_fields needs more tokens for large documents

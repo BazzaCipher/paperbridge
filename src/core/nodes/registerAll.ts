@@ -12,6 +12,7 @@ import { CalculationNode } from '../../components/nodes/CalculationNode';
 import { SheetNode } from '../../components/nodes/SheetNode';
 import { LabelNode } from '../../components/nodes/LabelNode';
 import { GroupNode } from '../../components/nodes/GroupNode';
+import { MatchNode } from '../../components/nodes/MatchNode';
 
 import {
   defaultDisplayData,
@@ -19,6 +20,7 @@ import {
   defaultCalculationData,
   defaultSheetData,
   defaultLabelData,
+  defaultMatchData,
 } from '../../components/canvas/nodeDefaults';
 
 registerNodeType({
@@ -85,6 +87,17 @@ registerNodeType({
   defaultData: {},
   capabilities: { canExport: false, canImport: true, isFileNode: false },
   creatable: false,
+});
+
+registerNodeType({
+  type: 'match',
+  label: 'Match',
+  icon: 'calculation',
+  component: MatchNode,
+  defaultData: defaultMatchData,
+  capabilities: { canExport: true, canImport: true, isFileNode: false },
+  creatable: true,
+  description: 'Reconcile two data sources',
 });
 
 registerNodeType({

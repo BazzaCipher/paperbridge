@@ -178,15 +178,20 @@ export function FileNodePreview({
               title={compressed ? 'Expand node' : 'Compress node'}
             >
               {compressed ? (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 01-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 110-2h4a1 1 0 011 1v4a1 1 0 11-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12zm-9 7a1 1 0 112 0v1.586l2.293-2.293a1 1 0 011.414 1.414L6.414 15H8a1 1 0 110 2H4a1 1 0 01-1-1v-4zm13 0a1 1 0 10-2 0v1.586l-2.293-2.293a1 1 0 00-1.414 1.414L13.586 15H12a1 1 0 100 2h4a1 1 0 001-1v-4z" fill="currentColor" />
+                /* Expand: arrows point OUTWARD to corners */
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="12 4 16 4 16 8" />
+                  <line x1="16" y1="4" x2="11" y2="9" />
+                  <polyline points="8 16 4 16 4 12" />
+                  <line x1="4" y1="16" x2="9" y2="11" />
                 </svg>
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4.5 4.5L8 8M4.5 4.5H7M4.5 4.5V7" />
-                  <path d="M15.5 4.5L12 8M15.5 4.5H13M15.5 4.5V7" />
-                  <path d="M4.5 15.5L8 12M4.5 15.5H7M4.5 15.5V13" />
-                  <path d="M15.5 15.5L12 12M15.5 15.5H13M15.5 15.5V13" />
+                /* Compress: arrows point INWARD from corners toward center */
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 5 11 5 11 9" />
+                  <line x1="11" y1="9" x2="16" y2="4" />
+                  <polyline points="5 15 9 15 9 11" />
+                  <line x1="9" y1="11" x2="4" y2="16" />
                 </svg>
               )}
             </button>

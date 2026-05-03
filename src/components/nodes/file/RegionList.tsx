@@ -108,51 +108,54 @@ export function RegionList({
 
   // Compact view - just show values with type indicator
   if (compact) {
+    // Skip table-owned rows — they live in the TxnGroup, not the field list.
+    const standalone = regions.filter((r) => !r.tableSourceId);
+
+    const renderRow = (region: ExtractedRegion) => {
+      const displayValue = getDisplayValue(region);
+      const typeColor = getTypeBadgeClass(region.dataType);
+      const isExternal = isExternallyHighlighted(region.id);
+      return (
+        <NodeEntry
+          key={region.id}
+          id={region.id}
+          handleType="source"
+          handlePosition={Position.Right}
+          handleColor={region.color}
+          className={`group hover:bg-paper-50 cursor-pointer ${
+            selectedRegionId === region.id ? 'bg-copper-400/10' : ''
+          } ${isExternal ? 'bg-copper-400/20 ring-2 ring-copper-400' : ''}`}
+        >
+          <div
+            className="flex items-center gap-2 flex-1 min-w-0 self-stretch"
+            onClick={() => onRegionSelect(region.id)}
+          >
+            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${typeColor}`} />
+            <span className="text-xs text-bridge-500 truncate max-w-[80px]">{region.label}</span>
+            <span className={`text-sm font-medium truncate flex-1 ${
+              displayValue ? 'text-bridge-900' : 'text-bridge-400'
+            }`}>
+              {displayValue || '(empty)'}
+            </span>
+          </div>
+        </NodeEntry>
+      );
+    };
+
     return (
       <div className="divide-y divide-paper-100">
-        {regions.map((region) => {
-          const displayValue = getDisplayValue(region);
-          const typeColor = getTypeBadgeClass(region.dataType);
-          const isExternal = isExternallyHighlighted(region.id);
-
-          return (
-            <NodeEntry
-              key={region.id}
-              id={region.id}
-              handleType="source"
-              handlePosition={Position.Right}
-              handleColor={region.color}
-              className={`group hover:bg-paper-50 cursor-pointer ${
-                selectedRegionId === region.id ? 'bg-copper-400/10' : ''
-              } ${isExternal ? 'bg-copper-400/20 ring-2 ring-copper-400' : ''}`}
-            >
-              <div
-                className="flex items-center gap-2 flex-1 min-w-0 py-0.5"
-                onClick={() => onRegionSelect(region.id)}
-              >
-                {/* Type color indicator */}
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${typeColor}`} />
-
-                {/* Label */}
-                <span className="text-xs text-bridge-500 truncate max-w-[60px]">
-                  {region.label}
-                </span>
-
-                {/* Value */}
-                <span className={`text-sm font-medium truncate flex-1 ${
-                  displayValue ? 'text-bridge-900' : 'text-bridge-400'
-                }`}>
-                  {displayValue || '(empty)'}
-                </span>
-              </div>
-            </NodeEntry>
-          );
-        })}
+        {standalone.length > 0 ? (
+          standalone.map((r) => renderRow(r))
+        ) : (
+          <div className="px-3 py-2 text-[11px] text-bridge-400 italic">No fields</div>
+        )}
       </div>
     );
   }
 
-  // Full view - editable with all controls
+  // Full view - editable with all controls.
+  // Hide table-owned rows; they're represented by their TxnGroup.
+  const visibleRegions = regions.filter((r) => !r.tableSourceId);
   return (
     <div className="divide-y divide-paper-100">
       {/* Toggle header */}
@@ -170,7 +173,7 @@ export function RegionList({
 
       {/* Collapsed view - name + value only */}
       {collapsedView ? (
-        regions.map((region) => {
+        visibleRegions.map((region) => {
           const displayValue = getDisplayValue(region);
           const typeColor = getTypeBadgeClass(region.dataType);
           const isExternal = isExternallyHighlighted(region.id);
@@ -197,7 +200,7 @@ export function RegionList({
         })
       ) : (
         /* Full editable view */
-        regions.map((region) => {
+        visibleRegions.map((region) => {
           const displayValue = getDisplayValue(region);
           const rawValue = getRawValue(region);
           const hasValue = rawValue !== '';

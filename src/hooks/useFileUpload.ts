@@ -94,7 +94,8 @@ export function useFileUpload({ onFileRegistered, allowedTypes = ['pdf', 'image'
     if (isPdf && !allowedTypes.includes('pdf')) return null;
     if (isImage && !allowedTypes.includes('image')) return null;
 
-    const result = await BlobRegistry.registerWithMetadata(file, nodeId, folderId);
+    const canvasId = useCanvasStore.getState().canvasId;
+    const result = await BlobRegistry.registerWithMetadata(file, canvasId, nodeId, folderId);
 
     return {
       fileId: result.fileId,

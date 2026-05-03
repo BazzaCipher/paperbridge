@@ -8,6 +8,7 @@ interface CollapsiblePanelProps {
   headerClassName?: string;
   badge?: number;
   side?: 'left' | 'right';
+  orientation?: 'horizontal' | 'vertical';
 }
 
 export function CollapsiblePanel({
@@ -18,15 +19,22 @@ export function CollapsiblePanel({
   headerClassName = '',
   badge,
   side = 'right',
+  orientation = 'horizontal',
 }: CollapsiblePanelProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const isVertical = orientation === 'vertical';
+
+  const horizontalRotation = isOpen
+    ? side === 'right' ? 'rotate-0' : 'rotate-180'
+    : side === 'right' ? 'rotate-180' : 'rotate-0';
+  const verticalRotation = isOpen ? '-rotate-90' : 'rotate-180';
 
   return (
     <div
       className={`
         flex flex-col bg-white border-paper-200 transition-all duration-200
-        ${side === 'right' ? 'border-l' : 'border-r'}
-        ${isOpen ? 'w-72' : 'w-10'}
+        ${isVertical ? '' : side === 'right' ? 'border-l' : 'border-r'}
+        ${isVertical ? `w-full ${isOpen ? 'flex-1 min-h-0' : 'flex-none'}` : isOpen ? 'w-72' : 'w-10'}
         ${className}
       `}
     >
@@ -43,7 +51,7 @@ export function CollapsiblePanel({
         <svg
           xmlns="http://www.w3.org/2000/svg"
           className={`h-4 w-4 text-bridge-500 transition-transform ${
-            isOpen ? (side === 'right' ? 'rotate-0' : 'rotate-180') : (side === 'right' ? 'rotate-180' : 'rotate-0')
+            isVertical ? verticalRotation : horizontalRotation
           }`}
           viewBox="0 0 20 20"
           fill="currentColor"
@@ -55,7 +63,7 @@ export function CollapsiblePanel({
           />
         </svg>
 
-        {isOpen && (
+        {(isOpen || isVertical) && (
           <>
             <span className="flex-1 text-sm font-medium text-bridge-700">{title}</span>
             {badge !== undefined && badge > 0 && (
@@ -74,8 +82,8 @@ export function CollapsiblePanel({
         </div>
       )}
 
-      {/* Collapsed indicator */}
-      {!isOpen && badge !== undefined && badge > 0 && (
+      {/* Collapsed indicator (horizontal only) */}
+      {!isOpen && !isVertical && badge !== undefined && badge > 0 && (
         <div className="flex justify-center py-2">
           <span className="w-6 h-6 flex items-center justify-center text-xs bg-copper-400/20 text-copper-600 rounded-full">
             {badge}

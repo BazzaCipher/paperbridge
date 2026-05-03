@@ -28,8 +28,10 @@ import {
   createValidationSlice,
   createLayoutSlice,
   createFileRegistrySlice,
+  createTxnGroupSlice,
   type HistorySnapshot,
 } from './slices';
+import type { TxnGroup } from '../core/sources/txnGroup';
 import type { FileMetadata, VirtualFolder } from './canvasPersistence';
 
 // Combined store interface (maintains backward compatibility)
@@ -130,6 +132,13 @@ interface CanvasStore {
   getSortedFilteredFiles: () => FileMetadata[];
   getDuplicateGroups: () => Map<string, FileMetadata[]>;
   refreshFileRegistry: () => void;
+
+  // TxnGroups
+  txnGroups: Record<string, TxnGroup>;
+  addTxnGroup: (group: TxnGroup, id?: string) => string;
+  updateTxnGroup: (id: string, patch: Partial<TxnGroup>) => void;
+  removeTxnGroup: (id: string) => void;
+  getTxnGroup: (id: string) => TxnGroup | undefined;
 }
 
 /**
@@ -145,4 +154,5 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   ...createValidationSlice(set, get),
   ...createLayoutSlice(set, get),
   ...createFileRegistrySlice(set, get),
+  ...createTxnGroupSlice(set, get),
 }));

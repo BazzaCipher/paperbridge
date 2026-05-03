@@ -1,5 +1,8 @@
 import Tesseract from 'tesseract.js';
 import type { DataValue, RegionCoordinates } from '../../types';
+import { debug } from '../../utils/debug'; // see src/utils/debug.ts
+
+const log = debug('ocr');
 
 let worker: Tesseract.Worker | null = null;
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -38,6 +41,31 @@ interface ExtractionResult {
   text: string;
   confidence: number;
   dataValue: DataValue;
+}
+
+/**
+ * Map a region from CSS-pixel display space to the source image's natural-pixel
+ * space. RegionSelector emits coords against the rendered document width
+ * (e.g. 500 CSS px), but a PDF canvas's internal pixel buffer is dpr-scaled and
+ * an <img>'s natural dims can dwarf its rendered width. Cropping with raw CSS
+ * coords lands on a tiny upper-left slice and OCR sees nothing.
+ */
+function scaleRegionToNatural(
+  img: HTMLImageElement | HTMLCanvasElement,
+  region: RegionCoordinates,
+): RegionCoordinates {
+  const naturalW = img instanceof HTMLImageElement ? img.naturalWidth : img.width;
+  const naturalH = img instanceof HTMLImageElement ? img.naturalHeight : img.height;
+  const cssW = (img as HTMLElement).clientWidth || naturalW;
+  const cssH = (img as HTMLElement).clientHeight || naturalH;
+  const sx = naturalW / cssW;
+  const sy = naturalH / cssH;
+  return {
+    x: region.x * sx,
+    y: region.y * sy,
+    width: region.width * sx,
+    height: region.height * sy,
+  };
 }
 
 function parseExtractedText(text: string): DataValue {
@@ -104,21 +132,20 @@ export async function extractTextFromRegion(
     img = imageSource;
   }
 
-  // Set canvas size to region size
-  canvas.width = region.width;
-  canvas.height = region.height;
+  const src = scaleRegionToNatural(img, region);
+  canvas.width = Math.max(1, Math.round(src.width));
+  canvas.height = Math.max(1, Math.round(src.height));
 
-  // Draw cropped region to canvas
   ctx.drawImage(
     img,
-    region.x,
-    region.y,
-    region.width,
-    region.height,
+    src.x,
+    src.y,
+    src.width,
+    src.height,
     0,
     0,
-    region.width,
-    region.height
+    canvas.width,
+    canvas.height,
   );
 
   // Run OCR on the cropped region
@@ -138,6 +165,90 @@ export async function extractTextFromRegion(
       source: undefined, // Source will be added by the caller
     },
   };
+}
+
+/**
+ * Full-page OCR on a cropped rectangular region of the source image.
+ * Used by table-mode extraction where a user lasso'd a tabular area.
+ */
+export async function extractFullPageFromRegion(
+  imageSource: HTMLImageElement | HTMLCanvasElement | string,
+  region: RegionCoordinates,
+): Promise<FullPageOcrResult> {
+  let img: HTMLImageElement | HTMLCanvasElement;
+  if (typeof imageSource === 'string') {
+    img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Failed to load image for OCR'));
+      image.src = imageSource;
+    });
+  } else {
+    img = imageSource;
+  }
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Failed to get canvas context');
+  const src = scaleRegionToNatural(img, region);
+  canvas.width = Math.max(1, Math.round(src.width));
+  canvas.height = Math.max(1, Math.round(src.height));
+  // Fill white so any alpha/out-of-bounds pixels don't read as black to OCR.
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(
+    img,
+    src.x,
+    src.y,
+    src.width,
+    src.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+  log('crop', {
+    region,
+    src,
+    canvas: { w: canvas.width, h: canvas.height },
+    natural: { w: img instanceof HTMLImageElement ? img.naturalWidth : img.width, h: img instanceof HTMLImageElement ? img.naturalHeight : img.height },
+  });
+  return extractFullPage(canvas);
+}
+
+/**
+ * Crop a region of the source image to a base64 PNG (no OCR).
+ * Returns the same crop that extractFullPageFromRegion would feed to OCR.
+ */
+export async function cropRegionToDataUrl(
+  imageSource: HTMLImageElement | HTMLCanvasElement | string,
+  region: RegionCoordinates,
+): Promise<{ mimeType: string; base64: string }> {
+  let img: HTMLImageElement | HTMLCanvasElement;
+  if (typeof imageSource === 'string') {
+    img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Failed to load image for crop'));
+      image.src = imageSource;
+    });
+  } else {
+    img = imageSource;
+  }
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Failed to get canvas context');
+  const src = scaleRegionToNatural(img, region);
+  canvas.width = Math.max(1, Math.round(src.width));
+  canvas.height = Math.max(1, Math.round(src.height));
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, src.x, src.y, src.width, src.height, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/png');
+  const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+  return { mimeType: 'image/png', base64 };
 }
 
 export async function extractTextFromPdfPage(
@@ -203,8 +314,10 @@ export async function extractFullPage(
   const imageWidth = img instanceof HTMLImageElement ? img.naturalWidth : img.width;
   const imageHeight = img instanceof HTMLImageElement ? img.naturalHeight : img.height;
 
-  // Run OCR on the full image
-  const result = await tesseractWorker.recognize(img);
+  // Run OCR on the full image. Tesseract.js v5+ requires opting in to
+  // structured output (blocks/paragraphs/lines/words); without this only
+  // `data.text` is populated.
+  const result = await tesseractWorker.recognize(img, {}, { blocks: true });
 
   // Tesseract structure: Page -> blocks[] -> paragraphs[] -> lines[] -> words[]
   // Flatten the hierarchy to get all words and lines

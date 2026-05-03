@@ -3,6 +3,10 @@ import type { LynkNode } from '../../types';
 import { CanExport, CanImport, CalculationNode, ExtractorNode, DisplayNode, ViewportNode } from '../../types';
 import { wouldCreateCycle } from './dependencyGraph';
 import { getOperation, isTypeCompatible } from '../operations/operationRegistry';
+import { txnGroupHandle } from '../handles/txnGroup';
+import { debug } from '../../utils/debug'; // see src/utils/debug.ts
+
+const log = debug('canvas');
 
 export interface ConnectionValidationContext {
   nodes: LynkNode[];
@@ -15,6 +19,22 @@ export interface ConnectionValidationResult {
 }
 
 export function validateConnection(
+  connection: {
+    source?: string | null;
+    target?: string | null;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  },
+  context: ConnectionValidationContext
+): ConnectionValidationResult {
+  const result = _validate(connection, context);
+  if (!result.valid) {
+    log('reject', { reason: result.reason, ...connection });
+  }
+  return result;
+}
+
+function _validate(
   connection: {
     source?: string | null;
     target?: string | null;
@@ -50,6 +70,20 @@ export function validateConnection(
   // Check if target node can import (has input handles)
   if (!CanImport.is(targetNode)) {
     return { valid: false, reason: 'This node type cannot receive data' };
+  }
+
+  // TxnGroup-typed handles: source handle id starts with "txngroup:" — payload
+  // is a TxnGroup reference, not a scalar. Targets must explicitly opt in by
+  // exposing a target handle whose id also starts with "txngroup:".
+  const sourceIsTxnGroup = txnGroupHandle.is(connection.sourceHandle);
+  const targetIsTxnGroup = txnGroupHandle.is(connection.targetHandle);
+  if (sourceIsTxnGroup !== targetIsTxnGroup) {
+    return {
+      valid: false,
+      reason: sourceIsTxnGroup
+        ? 'Transaction group can only connect to a TxnGroup input'
+        : 'TxnGroup input only accepts a transaction group',
+    };
   }
 
   // ViewportNode targets: only accept from DisplayNode, max 1 input

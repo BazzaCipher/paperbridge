@@ -1,3 +1,6 @@
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+
 interface PanelToggleProps {
   side: 'left' | 'right';
   isOpen: boolean;
@@ -6,34 +9,33 @@ interface PanelToggleProps {
 }
 
 export function PanelToggle({ side, isOpen, onClick, label }: PanelToggleProps) {
-  // Both panels use flex layout and push the canvas, so toggles stay at the edge
-  const positionClass = side === 'left'
-    ? 'top-4 left-2'
-    : 'top-4 right-2';
+  const positionClass = side === 'left' ? 'top-4 left-2' : 'top-4 right-2';
 
-  // Arrow direction:
-  // Left panel closed: > (point right, toward panel opening direction)
-  // Left panel open: < (point left, to close/collapse)
-  // Right panel closed: < (point left, toward panel opening direction)
-  // Right panel open: > (point right, to close/collapse)
-  const arrowPath = (side === 'left') !== isOpen
-    ? 'M9 5l7 7-7 7'   // >
-    : 'M15 19l-7-7 7-7'; // <
+  // Pointing direction: when closed, point toward the panel opens; when open, point toward close.
+  const pointsRight = (side === 'left') !== isOpen;
+  const Icon = pointsRight ? ChevronRight : ChevronLeft;
 
   const title = isOpen ? `Close ${label}` : `Open ${label}`;
 
   return (
-    <button
-      onClick={onClick}
-      className={`absolute ${positionClass} z-10 p-2.5 bg-white/80 backdrop-blur-sm rounded-full shadow-md
-                  text-bridge-400 hover:text-copper-500 hover:bg-copper-400/10 hover:shadow-lg
-                  transition-all duration-200 group touch-manipulation`}
-      title={title}
-      style={{ minWidth: 44, minHeight: 44 }}
-    >
-      <svg className="w-4 h-4 transition-transform group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d={arrowPath} />
-      </svg>
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={onClick}
+          className={`absolute ${positionClass} z-10 flex items-center justify-center
+                      h-9 w-9 bg-white/80 backdrop-blur-md border border-paper-100 rounded-full
+                      shadow-[0_2px_8px_rgba(16,42,67,0.06)]
+                      text-bridge-500 hover:text-copper-500 hover:bg-white
+                      hover:shadow-[0_4px_12px_rgba(16,42,67,0.08)]
+                      active:scale-95
+                      transition-all duration-150 ease-[var(--ease-spring)] touch-manipulation
+                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400`}
+          aria-label={title}
+        >
+          <Icon className="h-4 w-4" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side={side === 'left' ? 'right' : 'left'}>{title}</TooltipContent>
+    </Tooltip>
   );
 }

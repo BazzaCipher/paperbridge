@@ -136,13 +136,13 @@ export class SourceNode {
 
 /** Nodes that can be connection sources (have output handles) */
 export const CanExport = {
-  types: ['display', 'extractor', 'calculation', 'sheet', 'label'] as LynkNodeType[],
+  types: ['display', 'extractor', 'calculation', 'sheet', 'label', 'match'] as LynkNodeType[],
   is: (node: LynkNode) => hasCapability(node.type, 'canExport'),
 };
 
 /** Nodes that can be connection targets (have input handles) */
 export const CanImport = {
-  types: ['viewport', 'calculation', 'sheet', 'label'] as LynkNodeType[],
+  types: ['viewport', 'calculation', 'sheet', 'label', 'match'] as LynkNodeType[],
   is: (node: LynkNode) => hasCapability(node.type, 'canImport'),
 };
 

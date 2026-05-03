@@ -3,6 +3,7 @@ import { Handle, Position, useEdges } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import type { GroupNode as GroupNodeType } from '../../types';
 import { useCanvasStore } from '../../store/canvasStore';
+import { txnGroupHandle, TXNGROUP_HANDLE_COLOR } from '../../core/handles/txnGroup';
 
 const COLLAPSED_WIDTH = 220;
 const COLLAPSED_HEIGHT = 60;
@@ -183,6 +184,17 @@ export function GroupNode({ id, data, selected }: NodeProps<GroupNodeType>) {
           className="border-2 border-white !pointer-events-none"
           isConnectable={false}
         />
+
+        {/* Aggregated TxnGroup handle (when children emitted txngroup outputs) */}
+        {data.aggregatedTxnGroupId && (
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={txnGroupHandle.make(data.aggregatedTxnGroupId)}
+            style={{ ...handleStyle, right: -8, top: '70%', background: TXNGROUP_HANDLE_COLOR }}
+            className="border-2 border-white"
+          />
+        )}
       </div>
     );
   }

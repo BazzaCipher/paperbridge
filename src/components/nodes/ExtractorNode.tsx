@@ -666,21 +666,32 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
         const contentSuggest = useHeader ? null : inferMappingFromContent(aiTable);
         const finalMapping = useHeader ? headerSuggest.mapping : contentSuggest?.mapping ?? null;
 
-        const groupId = tableRecord.txnGroupId;
-        const existingGroup = groupId ? getTxnGroup(groupId) : null;
-        if (finalMapping && existingGroup) {
-          const remapped = materializedTableToTxnGroup(aiTable, finalMapping, {
+        const existingGroupId = tableRecord.txnGroupId;
+        const existingGroup = existingGroupId ? getTxnGroup(existingGroupId) : null;
+        let nextGroupId: string | undefined = existingGroupId;
+        if (finalMapping) {
+          const labelForGroup = existingGroup?.label ?? data.label ?? 'Bank statement';
+          const pageRangeForGroup =
+            (existingGroup?.origin.kind === 'bank' ? existingGroup.origin.pageRange : undefined) ??
+            [tableRecord.pageNumber, tableRecord.pageNumber];
+          const built = materializedTableToTxnGroup(aiTable, finalMapping, {
             nodeId: id,
-            label: existingGroup.label,
+            label: labelForGroup,
             fileId: data.fileId ?? '',
-            pageRange: (existingGroup.origin.kind === 'bank' ? existingGroup.origin.pageRange : undefined) ?? [1, 1],
+            pageRange: pageRangeForGroup,
           });
-          if (remapped.transactions.length > 0 && groupId) {
-            updateTxnGroup(groupId, {
-              label: existingGroup.label,
-              transactions: remapped.transactions,
-              origin: remapped.origin,
-            });
+          if (built.transactions.length > 0) {
+            if (existingGroupId && existingGroup) {
+              updateTxnGroup(existingGroupId, {
+                label: existingGroup.label,
+                transactions: built.transactions,
+                origin: built.origin,
+              });
+            } else {
+              // No txnGroup yet (initial extract didn't find a mapping). Create one
+              // now so the auto-fixed bank-statement data isn't silently dropped.
+              nextGroupId = addTxnGroup(built);
+            }
           }
         }
 
@@ -698,7 +709,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
         );
         const otherRegions = data.regions.filter((r) => r.tableSourceId !== tableId);
         const nextTables = (data.tables ?? []).map((t) =>
-          t.id === tableId ? { ...t, selection: newSelection } : t,
+          t.id === tableId ? { ...t, selection: newSelection, txnGroupId: nextGroupId } : t,
         );
         updateNodeData(id, {
           regions: [...otherRegions, ...newRows],
@@ -782,12 +793,14 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
       data.fileType,
       data.fileUrl,
       data.fileId,
+      data.label,
       data.regions,
       activeProvider,
       activeConfig,
       applyColumnSelection,
       getTxnGroup,
       updateTxnGroup,
+      addTxnGroup,
       updateNodeData,
       showToast,
     ],

@@ -17,7 +17,7 @@ import { detectFields, fieldOverlapsExisting } from '../../core/extraction/field
 import { buildTableSelectionFromOcr } from '../../core/extraction/tableParser';
 import { materializeTable, materializeFromCells, type TableSelection, type MaterializedTable } from '../../core/extraction/tableMaterializer';
 import { detectTableWithAI, extractTableWithAIVision } from '../../services/aiService';
-import { suggestBankMapping, inferMappingFromContent, materializedTableToTxnGroup, singleTxnGroup } from '../../core/sources/txnGroup';
+import { suggestBankMapping, inferMappingFromContent, materializedTableToTxnGroup, remapBankTxnGroup, setRoleForHeader, singleTxnGroup, type BankColumnMapping, type BankColumnRole } from '../../core/sources/txnGroup';
 import { useAiSettings } from '../../hooks/useAiSettings';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useToast } from '../ui/Toast';
@@ -1000,6 +1000,22 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
     [getTxnGroup, updateTxnGroup],
   );
 
+  const handleTxnGroupMappingChange = useCallback(
+    (groupId: string, header: string, role: BankColumnRole | null) => {
+      const group = getTxnGroup(groupId);
+      if (!group || group.origin.kind !== 'bank') return;
+      const current: BankColumnMapping = group.origin.mapping ?? { date: '', description: '' };
+      const nextMapping = setRoleForHeader(header, role, current);
+      const remapped = remapBankTxnGroup(group, nextMapping, id);
+      updateTxnGroup(groupId, {
+        transactions: remapped.transactions,
+        origin: remapped.origin,
+        edited: true,
+      });
+    },
+    [getTxnGroup, updateTxnGroup, id],
+  );
+
   const handleTxnGroupRename = useCallback(
     (groupId: string, label: string) => {
       updateTxnGroup(groupId, { label });
@@ -1629,6 +1645,7 @@ export function ExtractorNode({ id, data, selected }: NodeProps<ExtractorNodeTyp
                 onDelete={handleTxnGroupDelete}
                 onTxnEdit={handleTxnGroupTxnEdit}
                 onAddColumn={handleTxnGroupAddColumn}
+                onMappingChange={handleTxnGroupMappingChange}
                 onAutoFixColumns={(groupId) => {
                   const t = (data.tables ?? []).find((tt) => tt.txnGroupId === groupId);
                   if (t) void handleAutoFixColumns(t.id);

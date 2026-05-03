@@ -5,6 +5,9 @@ import {
   parseSignedAmount,
   materializedTableToTxnGroup,
   suggestBankMapping,
+  getRoleForHeader,
+  setRoleForHeader,
+  remapBankTxnGroup,
 } from '../../core/sources/txnGroup';
 
 const META = { nodeId: 'ext1', label: 'Bank A', fileId: 'f1', pageRange: [1, 1] as [number, number] };
@@ -157,6 +160,109 @@ describe('materializedTableToTxnGroup — multi-line description merge', () => {
     expect(g.transactions[3].description).toContain('Internet Transfer');
     expect(g.transactions[3].description).toContain('X Li');
     expect(g.transactions[3].amount).toBe(-100);
+  });
+});
+
+describe('materializedTableToTxnGroup — persists mapping on origin', () => {
+  it('stores the column mapping on group.origin.mapping', () => {
+    const table: MaterializedTable = {
+      headers: ['Date', 'Description', 'Amount'],
+      rows: [['27/04/2026', 'COFFEE', '-5.50']],
+      cellBoxes: [],
+    };
+    const g = materializedTableToTxnGroup(
+      table,
+      { date: 'Date', description: 'Description', amount: 'Amount' },
+      META,
+    );
+    expect(g.origin.mapping).toEqual({
+      date: 'Date',
+      description: 'Description',
+      amount: 'Amount',
+    });
+  });
+});
+
+describe('getRoleForHeader / setRoleForHeader', () => {
+  const m = { date: 'Date', description: 'Desc', debit: 'Out', credit: 'In', balance: 'Bal' };
+
+  it('returns the assigned role for a header', () => {
+    expect(getRoleForHeader('Date', m)).toBe('date');
+    expect(getRoleForHeader('In', m)).toBe('credit');
+    expect(getRoleForHeader('Other', m)).toBeNull();
+    expect(getRoleForHeader('Anything', undefined)).toBeNull();
+  });
+
+  it('reassigns a role and clears the previous holder', () => {
+    const next = setRoleForHeader('Other', 'date', m);
+    expect(next.date).toBe('Other');
+    // Date role moved off original "Date" header.
+    expect(getRoleForHeader('Date', next)).toBeNull();
+  });
+
+  it('clears a role when role is null', () => {
+    const next = setRoleForHeader('In', null, m);
+    expect(next.credit).toBeUndefined();
+    expect(next.debit).toBe('Out');
+  });
+
+  it('switching to amount clears debit and credit', () => {
+    const next = setRoleForHeader('Total', 'amount', m);
+    expect(next.amount).toBe('Total');
+    expect(next.debit).toBeUndefined();
+    expect(next.credit).toBeUndefined();
+  });
+
+  it('switching to debit clears amount', () => {
+    const withAmount = { date: 'D', description: 'X', amount: 'A' };
+    const next = setRoleForHeader('Out', 'debit', withAmount);
+    expect(next.amount).toBeUndefined();
+    expect(next.debit).toBe('Out');
+  });
+});
+
+describe('remapBankTxnGroup', () => {
+  const table: MaterializedTable = {
+    headers: ['Date', 'Description', 'Out', 'In', 'Balance'],
+    rows: [
+      ['27/04/2026', 'COFFEE', '5.50', '', '994.50'],
+      ['28/04/2026', 'SALARY', '', '2,500.00', '3,494.50'],
+    ],
+    cellBoxes: [],
+  };
+  const original = materializedTableToTxnGroup(
+    table,
+    { date: 'Date', description: 'Description', debit: 'Out', credit: 'In', balance: 'Balance' },
+    META,
+  );
+
+  it('preserves group id, label, and meta when remapping', () => {
+    const remapped = remapBankTxnGroup(
+      original,
+      { date: 'Date', description: 'Description', debit: 'Out', credit: 'In', balance: 'Balance' },
+    );
+    expect(remapped.id).toBe(original.id);
+    expect(remapped.label).toBe(original.label);
+    expect(remapped.origin.fileId).toBe(original.origin.fileId);
+  });
+
+  it('updates origin.mapping to the new mapping', () => {
+    const newMap = { date: 'Date', description: 'Description', amount: 'Out' };
+    const remapped = remapBankTxnGroup(original, newMap);
+    expect(remapped.origin.mapping).toEqual(newMap);
+  });
+
+  it('re-derives transaction amounts under the new role assignment', () => {
+    // Treat the "Out" column as a single signed amount: the values are
+    // positive, so debits become positive credits under the new mapping.
+    const remapped = remapBankTxnGroup(
+      original,
+      { date: 'Date', description: 'Description', amount: 'Out' },
+    );
+    expect(remapped.transactions).toHaveLength(2);
+    expect(remapped.transactions[0].amount).toBe(5.5);
+    // Second row had no value in "Out", so amount is 0 under the new mapping.
+    expect(remapped.transactions[1].amount).toBe(0);
   });
 });
 

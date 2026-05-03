@@ -47,6 +47,9 @@ export interface TxnGroup {
     sourceHeaders?: string[];
     fileId?: string;
     pageRange?: [number, number];
+    /** Header→role assignment for kind='bank'. Lets the UI show & edit which
+     *  column is date / description / debit / credit / amount / balance. */
+    mapping?: BankColumnMapping;
   };
   meta?: BankStatementMeta;
   /** True once a user has manually edited transactions; rebuild effects must skip. */
@@ -268,6 +271,7 @@ export function materializedTableToTxnGroup(
       sourceHeaders: [...headers],
       fileId: meta.fileId,
       pageRange: meta.pageRange,
+      mapping: { ...mapping },
     },
     meta: {
       account: meta.account,
@@ -275,6 +279,115 @@ export function materializedTableToTxnGroup(
       statementPeriod: meta.statementPeriod,
       openingBalance: meta.openingBalance,
       closingBalance: meta.closingBalance,
+    },
+  };
+}
+
+// ─── Remap an existing bank TxnGroup with a new column mapping ───────────
+
+export type BankColumnRole = 'date' | 'description' | 'amount' | 'debit' | 'credit' | 'balance';
+
+/**
+ * Returns the role assigned to a header by the mapping, or null when the
+ * header is unassigned. Used by the TxnGroup UI to render role chips.
+ */
+export function getRoleForHeader(header: string, mapping?: BankColumnMapping): BankColumnRole | null {
+  if (!mapping) return null;
+  if (mapping.date === header) return 'date';
+  if (mapping.description === header) return 'description';
+  if (mapping.amount === header) return 'amount';
+  if (mapping.debit === header) return 'debit';
+  if (mapping.credit === header) return 'credit';
+  if (mapping.balance === header) return 'balance';
+  return null;
+}
+
+/**
+ * Returns a new BankColumnMapping with `header` reassigned to `role` (or
+ * cleared when role is null). Roles are unique: assigning a role to one
+ * header strips that role from any other header. Choosing 'amount' clears
+ * debit/credit (and vice versa) since the two layouts are mutually exclusive.
+ */
+export function setRoleForHeader(
+  header: string,
+  role: BankColumnRole | null,
+  mapping: BankColumnMapping,
+): BankColumnMapping {
+  const next: BankColumnMapping = {
+    date: mapping.date === header ? '' : mapping.date,
+    description: mapping.description === header ? '' : mapping.description,
+    amount: mapping.amount === header ? undefined : mapping.amount,
+    debit: mapping.debit === header ? undefined : mapping.debit,
+    credit: mapping.credit === header ? undefined : mapping.credit,
+    balance: mapping.balance === header ? undefined : mapping.balance,
+  };
+
+  if (!role) return next;
+
+  switch (role) {
+    case 'date':
+      next.date = header;
+      break;
+    case 'description':
+      next.description = header;
+      break;
+    case 'amount':
+      next.amount = header;
+      next.debit = undefined;
+      next.credit = undefined;
+      break;
+    case 'debit':
+      next.debit = header;
+      next.amount = undefined;
+      break;
+    case 'credit':
+      next.credit = header;
+      next.amount = undefined;
+      break;
+    case 'balance':
+      next.balance = header;
+      break;
+  }
+  return next;
+}
+
+/**
+ * Re-derive a bank TxnGroup's transactions using a new column mapping.
+ * Reads raw cells off existing transactions (which were already merged for
+ * multi-line descriptions at extract time) and rebuilds the txn list.
+ * Preserves group id, label, meta, and origin metadata; only transactions
+ * and origin.mapping change.
+ */
+export function remapBankTxnGroup(
+  group: TxnGroup,
+  mapping: BankColumnMapping,
+  nodeIdHint?: string,
+): TxnGroup {
+  const headers = group.origin.sourceHeaders ?? [];
+  const rows = group.transactions.map((t) => headers.map((h) => t.raw?.[h] ?? ''));
+  const built = materializedTableToTxnGroup(
+    { headers, rows, cellBoxes: [] },
+    mapping,
+    {
+      nodeId: nodeIdHint ?? group.origin.nodeIds[0] ?? '',
+      label: group.label,
+      fileId: group.origin.fileId ?? '',
+      pageRange: group.origin.pageRange ?? [1, 1],
+      id: group.id,
+      account: group.meta?.account,
+      currency: group.meta?.currency,
+      statementPeriod: group.meta?.statementPeriod,
+      openingBalance: group.meta?.openingBalance,
+      closingBalance: group.meta?.closingBalance,
+    },
+  );
+  return {
+    ...group,
+    transactions: built.transactions,
+    origin: {
+      ...group.origin,
+      sourceHeaders: headers,
+      mapping: { ...mapping },
     },
   };
 }

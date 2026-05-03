@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useCanvasStore } from '../../../store/canvasStore';
-import type { TxnGroup } from '../../../core/sources/txnGroup';
+import type { BankColumnRole, TxnGroup } from '../../../core/sources/txnGroup';
+import { getRoleForHeader } from '../../../core/sources/txnGroup';
 import { EditableLabel } from '../base/EditableLabel';
 
 interface TxnEditPatch {
@@ -17,7 +18,28 @@ interface TxnGroupListProps {
   onTxnEdit?: (groupId: string, txnId: string, patch: TxnEditPatch) => void;
   onAddColumn?: (groupId: string) => void;
   onAutoFixColumns?: (groupId: string) => void;
+  onMappingChange?: (groupId: string, header: string, role: BankColumnRole | null) => void;
 }
+
+const ROLE_OPTIONS: { value: BankColumnRole | ''; label: string }[] = [
+  { value: '', label: '—' },
+  { value: 'date', label: 'date' },
+  { value: 'description', label: 'desc' },
+  { value: 'debit', label: 'debit' },
+  { value: 'credit', label: 'credit' },
+  { value: 'amount', label: 'amount' },
+  { value: 'balance', label: 'balance' },
+];
+
+const ROLE_CHIP_CLASSES: Record<BankColumnRole | 'none', string> = {
+  date: 'bg-sky-100 text-sky-700 border-sky-200',
+  description: 'bg-paper-100 text-bridge-600 border-paper-200',
+  debit: 'bg-rose-100 text-rose-700 border-rose-200',
+  credit: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  amount: 'bg-violet-100 text-violet-700 border-violet-200',
+  balance: 'bg-amber-100 text-amber-700 border-amber-200',
+  none: 'bg-paper-50 text-bridge-400 border-paper-200',
+};
 
 function formatAmount(n: number): string {
   if (!Number.isFinite(n)) return '';
@@ -59,6 +81,7 @@ function GroupBlock({
   onTxnEdit,
   onAddColumn,
   onAutoFixColumns,
+  onMappingChange,
 }: {
   group: TxnGroup;
   onRename?: (groupId: string, label: string) => void;
@@ -66,10 +89,13 @@ function GroupBlock({
   onTxnEdit?: (groupId: string, txnId: string, patch: TxnEditPatch) => void;
   onAddColumn?: (groupId: string) => void;
   onAutoFixColumns?: (groupId: string) => void;
+  onMappingChange?: (groupId: string, header: string, role: BankColumnRole | null) => void;
 }) {
   const [isOpen, setIsOpen] = useState(true);
   const headers = group.origin.sourceHeaders;
+  const mapping = group.origin.mapping;
   const txns = group.transactions;
+  const isBank = group.origin.kind === 'bank';
 
   return (
     <div className="border-b border-paper-200">
@@ -153,11 +179,45 @@ function GroupBlock({
           <table className="w-full text-[11px]">
             <thead>
               <tr className="bg-paper-50 text-bridge-500">
-                {headers.map((h) => (
-                  <th key={h} className="px-2 py-1 text-left font-medium whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
+                {headers.map((h) => {
+                  const role = isBank ? getRoleForHeader(h, mapping) : null;
+                  const chipKey: BankColumnRole | 'none' = role ?? 'none';
+                  return (
+                    <th key={h} className="px-2 py-1 text-left font-medium whitespace-nowrap align-top">
+                      <div className="flex flex-col items-start gap-0.5">
+                        <span>{h}</span>
+                        {isBank && (
+                          onMappingChange ? (
+                            <select
+                              value={role ?? ''}
+                              onChange={(e) =>
+                                onMappingChange(
+                                  group.id,
+                                  h,
+                                  (e.target.value || null) as BankColumnRole | null,
+                                )
+                              }
+                              className={`text-[9px] uppercase tracking-wide px-1 py-px rounded border cursor-pointer outline-none ${ROLE_CHIP_CLASSES[chipKey]}`}
+                              title="Re-assign this column's role"
+                            >
+                              {ROLE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span
+                              className={`text-[9px] uppercase tracking-wide px-1 py-px rounded border ${ROLE_CHIP_CLASSES[chipKey]}`}
+                            >
+                              {role ?? '—'}
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -226,7 +286,7 @@ function GroupBlock({
   );
 }
 
-export function TxnGroupList({ groupIds, onRename, onDelete, onTxnEdit, onAddColumn, onAutoFixColumns }: TxnGroupListProps) {
+export function TxnGroupList({ groupIds, onRename, onDelete, onTxnEdit, onAddColumn, onAutoFixColumns, onMappingChange }: TxnGroupListProps) {
   const txnGroups = useCanvasStore((state) => state.txnGroups);
   const groups = groupIds
     .map((gid) => txnGroups[gid])
@@ -251,6 +311,7 @@ export function TxnGroupList({ groupIds, onRename, onDelete, onTxnEdit, onAddCol
           onTxnEdit={onTxnEdit}
           onAddColumn={onAddColumn}
           onAutoFixColumns={onAutoFixColumns}
+          onMappingChange={onMappingChange}
         />
       ))}
     </div>

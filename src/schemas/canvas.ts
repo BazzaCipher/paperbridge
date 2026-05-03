@@ -274,6 +274,29 @@ const LabelNodeDataSchema = z.object({
   alignment: z.enum(['left', 'center', 'right']),
 });
 
+// Match node data
+const MatchPairRefSchema = z.object({
+  aId: z.string(),
+  bId: z.string(),
+  score: z.number(),
+});
+
+const ManualPairSchema = z.object({
+  aId: z.string(),
+  bId: z.string(),
+});
+
+const MatchNodeDataSchema = z.object({
+  label: z.string().optional(),
+  amountTolerance: z.number(),
+  dateWindowDays: z.number(),
+  pairs: z.array(MatchPairRefSchema),
+  unmatchedA: z.array(z.string()),
+  unmatchedB: z.array(z.string()),
+  manualOverrides: z.array(ManualPairSchema),
+  rejections: z.array(ManualPairSchema),
+}).passthrough();
+
 // Group node data
 const GroupNodeDataSchema = z.object({
   label: z.string(),
@@ -340,6 +363,13 @@ const NodeSchema = z.discriminatedUnion('type', [
     type: z.literal('group'),
     position: PositionSchema,
     data: GroupNodeDataSchema,
+  }).passthrough(),
+  z.object({
+    id: z.string(),
+    type: z.literal('match'),
+    position: PositionSchema,
+    parentId: z.string().optional(),
+    data: MatchNodeDataSchema,
   }).passthrough(),
 ]);
 

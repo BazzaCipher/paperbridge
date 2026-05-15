@@ -50,6 +50,15 @@ export function EmptyState() {
         <p className="text-center text-xs text-bridge-400 mt-3">
           Use the toolbar below to add nodes manually.
         </p>
+
+        <div className="mt-3 pt-3 border-t border-paper-100 text-center">
+          <a
+            href="mailto:barryzmeng@gmail.com?subject=Integrating%20Paperbridge%20into%20our%20practice"
+            className="text-xs font-medium text-copper-600 hover:text-copper-700 hover:underline underline-offset-4"
+          >
+            Contact me to discuss how to integrate this tool into your business
+          </a>
+        </div>
       </div>
     </div>
   );

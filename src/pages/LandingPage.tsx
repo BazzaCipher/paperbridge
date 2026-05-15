@@ -499,6 +499,16 @@ function CtaSection() {
             Read the blog
           </Link>
         </div>
+        <p className="mt-8 text-sm text-navy-300">
+          Want to roll this out across your practice?{' '}
+          <a
+            href="mailto:barryzmeng@gmail.com?subject=Integrating%20Paperbridge%20into%20our%20practice"
+            className="font-semibold text-green-400 hover:text-green-300 underline-offset-4 hover:underline"
+          >
+            Contact me to discuss how to integrate this tool into your business
+          </a>
+          .
+        </p>
       </div>
     </section>
   );
